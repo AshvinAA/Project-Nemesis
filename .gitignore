@@ -1,0 +1,6 @@
+node_modules/
+log/*.jsonl
+SDL3/
+BuddyDoom/build/
+*.exe
+*.obj
