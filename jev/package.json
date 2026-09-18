@@ -8,7 +8,7 @@
     "dev": "tsx src/main.ts",
     "replay": "tsx src/main.ts --replay log/observations.jsonl",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/composer.test.ts test/learning.test.ts test/stateCompiler.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

@@ -146,3 +146,15 @@ export const SPAWN_TYPES = [
 export type SpawnType = (typeof SPAWN_TYPES)[number];
 
 export interface PendingLine { line: string; kind: 'act' | 'buddy' | 'spawn' | 'item' | 'relax' | 'nemesis'; }
+
+// Vanilla spawnhealth per AI_TypeName() name — lets the composer reason about
+// wounded-ness from the raw hp the serializer reports.
+export const SPAWNHEALTH: Record<string, number> = {
+  zombie: 20, shotgun: 30, chaingun: 70, imp: 60, pinky: 150, spectre: 150,
+  lost: 100, caco: 400, pain: 400, knight: 200, baron: 1000, revenant: 250,
+  mancubus: 600, arachnotron: 250, monster: 60,
+};
+export function hpFraction(type: string, hp: number): number {
+  const max = SPAWNHEALTH[type] ?? 60;
+  return Math.max(0, Math.min(1, hp / max));
+}

@@ -158,30 +158,31 @@ export class LearningTracker implements LearningState {
   private lastDeathT = 0;
   private lastAmmoPct: number | undefined;
 
-  /** Difficulty controller: bounded step, evidence-gated, frustration-first. */
+  /** Difficulty controller: bounded step, evidence-gated, frustration-first.
+   * Input is the composer's extracted shape (composer.composeAdaptation). */
   applyAdaptation(ans: {
-    skill_is_outpacing_difficulty: { noul: number };
-    boredom_risk: { noul: number };
-    frustration_risk: { noul: number };
-    strongest_axis?: { choice: string };
+    frustration: number;
+    boredom: number;
+    outpacing: number;
+    strongest?: string;
   }): { stepped: boolean; from: number; to: number; reason: string } {
     const c = this.cfg.learning;
     const evidenceMass = AXES.reduce((s, a) => s + (this.evidence[a] ?? 0), 0);
     const from = this.difficulty;
 
     // Frustration wins over boredom — never stack difficulty on a struggling player.
-    if (ans.frustration_risk?.noul > 0.6) {
+    if (ans.frustration > 0.6) {
       this.difficulty = Math.max(c.difficultyFloor, this.difficulty - c.maxStepPerInterval);
       return { stepped: true, from, to: this.difficulty, reason: 'frustration' };
     }
     if (evidenceMass < c.minEvidence) {
       return { stepped: false, from, to: this.difficulty, reason: 'low-evidence' };
     }
-    if (ans.skill_is_outpacing_difficulty?.noul > 0.65 && ans.boredom_risk?.noul < 0.4) {
+    if (ans.outpacing > 0.65 && ans.boredom < 0.4) {
       this.difficulty = Math.min(c.difficultyCeiling, this.difficulty + c.maxStepPerInterval);
       return { stepped: true, from, to: this.difficulty, reason: 'dominance' };
     }
-    if (ans.boredom_risk?.noul > 0.6) {
+    if (ans.boredom > 0.6) {
       this.difficulty = Math.min(c.difficultyCeiling, this.difficulty + c.maxStepPerInterval / 2);
       return { stepped: true, from, to: this.difficulty, reason: 'boredom' };
     }
