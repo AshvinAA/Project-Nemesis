@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { loadConfig, type CadencePreset, type BridgeConfig } from './config.js';
 import { JevClient } from './jevClient.js';
 import { GameLink } from './gameLink.js';
+import { mockAnswer } from './mockJev.js';
 import { squadsOf, compileSquad, compilePacing, compileBuddy, compileAdapt, compileNemesis } from './stateCompiler.js';
 import { DecisionComposer } from './composer.js';
 import { LearningTracker } from './learning.js';
@@ -112,10 +113,22 @@ function buildReq(purpose: string, c: { state: unknown; questions: Record<string
   return { state: c.state, model: cfg.typesafe.model, questions: c.questions };
 }
 
+const mock = process.argv.includes('--mock');
+
+async function jevCall(purpose: string, req: JevRequest) {
+  if (mock) {
+    const ans = mockAnswer(purpose, req);
+    // Log mock calls too, so replay stats stay comparable.
+    appendFileSync(join(cfg.logDir, 'calls.jsonl'), `${JSON.stringify({ t: Date.now(), purpose, latencyMs: 0, ok: true, model: ans.model, mock: true })}\n`);
+    return ans;
+  }
+  return jev.call(purpose, req);
+}
+
 async function runSquad(squad: { region: number; members: Observation['monsters'] }) {
   if (!lastObs?.player) return;
   const compiled = compileSquad(lastObs, squad, learning, cfg);
-  const answers = await jev.call('squad', buildReq('squad', compiled));
+  const answers = await jevCall('squad', buildReq('squad', compiled));
   const emit = composer.composeSquad(lastObs, squad, answers?.answers ?? null);
   for (const a of emit.acts) link.act(a.order, a.ids, { focus: a.focus, forTics: a.forTics });
   if (emit.acts.length) noteLine('act', JSON.stringify(emit.acts));
@@ -123,7 +136,7 @@ async function runSquad(squad: { region: number; members: Observation['monsters'
 
 async function runPacing(obs: Observation) {
   const compiled = compilePacing(obs, learning, cfg);
-  const answers = await jev.call('pacing', buildReq('pacing', compiled));
+  const answers = await jevCall('pacing', buildReq('pacing', compiled));
   const emit = composer.composePacing(obs, answers?.answers ?? null, learning.difficulty);
 
   for (const s of emit.spawns) {
@@ -137,14 +150,14 @@ async function runPacing(obs: Observation) {
 async function runBuddy(obs: Observation) {
   const compiled = compileBuddy(obs, cfg);
   if (!compiled) return;
-  const answers = await jev.call('buddy', buildReq('buddy', compiled));
+  const answers = await jevCall('buddy', buildReq('buddy', compiled));
   const emit = composer.composeBuddy(obs, answers?.answers ?? null);
   if (emit.buddy) { link.buddy(emit.buddy.order, { forTics: emit.buddy.forTics }); noteLine('buddy', emit.buddy.order); }
 }
 
 async function runAdapt(obs: Observation) {
   const compiled = compileAdapt(obs, learning, cfg);
-  const answers = await jev.call('adapt', buildReq('adapt', compiled));
+  const answers = await jevCall('adapt', buildReq('adapt', compiled));
   const composed = composer.composeAdaptation(answers?.answers ?? null);
   if (!composed) return;
   const result = learning.applyAdaptation(composed);
@@ -154,7 +167,7 @@ async function runAdapt(obs: Observation) {
 async function runNemesisJudgment(type: string, weapon: string, nem: NemesisState | undefined) {
   const compiled = compileNemesis(type, weapon, nem, learning, cfg);
   if (!compiled) return;
-  const answers = await jev.call('nemesis', buildReq('nemesis', compiled));
+  const answers = await jevCall('nemesis', buildReq('nemesis', compiled));
   const deltas = composer.composeNemesis(type, answers?.answers ?? null);
   if (deltas.length) {
     link.nemesisPropose(deltas);
@@ -175,8 +188,13 @@ function runReplay(path: string) {
     const line = lines[i++];
     if (!line) {
       clearInterval(timer);
-      console.log('[replay] done. Emitted lines:', readFileSync(join(cfg.logDir, 'emitted.jsonl'), 'utf8').split('\n').filter(Boolean).length);
+      const emittedPath = join(cfg.logDir, 'emitted.jsonl');
+      const emitted = existsSync(emittedPath)
+        ? readFileSync(emittedPath, 'utf8').split('\n').filter(Boolean).length
+        : 0;
+      console.log('[replay] done. Emitted lines:', emitted);
       console.log('[replay] Jev stats:', JSON.stringify(jev.stats()));
+      jev.close();
       process.exit(0);
     }
     try { await handleObservation(JSON.parse(line) as Observation); } catch (e) { console.error('[replay] line error', e); }
@@ -195,7 +213,7 @@ setInterval(() => {
 if (replayPath) {
   runReplay(replayPath);
 } else {
-  console.log(`[bridge] starting: cadence=${presetArg} dryRun=${cfg.dryRun} director=:${cfg.game.directorPort} player=:${cfg.game.playerPort}`);
+  console.log(`[bridge] starting: cadence=${presetArg} dryRun=${cfg.dryRun} mock=${process.argv.includes('--mock')} director=:${cfg.game.directorPort} player=:${cfg.game.playerPort}`);
   link.start();
 }
 

@@ -345,7 +345,7 @@ export function compileNemesis(
 
   const state = {
     narrative: `A ${type} was killed by the player's ${killingWeapon} ` +
-      `while executing "${row.recent.at(-1) ?? 'chase'}". Deaths to this type so far: ${row.deaths}.`,
+      `while executing "${row.recent?.at(-1) ?? 'chase'}". Deaths to this type so far: ${row.deaths}.`,
     row: { type: row.type, tactics: row.tactics, weapon_bias: row.weapon_bias, deaths: row.deaths },
     deaths_by_weapon: row.deaths_by_weapon,
     difficulty: Math.round(learning.difficulty * 10) / 10,

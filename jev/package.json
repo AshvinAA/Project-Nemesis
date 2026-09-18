@@ -6,7 +6,8 @@
   "description": "JEV Director bridge for BuddyDoom: Jev-driven adaptive nemesis fabric",
   "scripts": {
     "dev": "tsx src/main.ts",
-    "replay": "tsx src/main.ts --replay log/observations.jsonl",
+    "replay": "tsx src/main.ts --replay log/observations.jsonl --mock",
+    "replay:dry": "tsx src/main.ts --replay log/observations.jsonl",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/composer.test.ts test/learning.test.ts test/stateCompiler.test.ts"
   },
