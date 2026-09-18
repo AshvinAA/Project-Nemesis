@@ -1,0 +1,2033 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	DOOM main program (D_DoomMain) and game loop (D_DoomLoop),
+//	plus functions to determine game mode (shareware, registered),
+//	parse command line parameters, configure game parameters (turbo),
+//	and call the startup functions.
+//
+//-----------------------------------------------------------------------------
+
+
+static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
+
+#define	BGCOLOR		7
+#define	FGCOLOR		8
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>	// strrchr/strcasecmp -- declared so their pointer/return isn't truncated (LLP64)
+#include <ctype.h>	// toupper (DEMOLOOP lump names)
+#ifdef _WIN32
+#include <io.h>		// _findfirst -- directory scan for auto-loading buddy WADs
+#else
+#include <dirent.h>
+#endif
+
+#ifndef _WIN32
+extern int access(char *file, int mode);	// on Windows <io.h> (above) already declares it
+#endif
+
+#define R_OK	4
+#if 0
+static int access(char *file, int mode)
+{
+	FILE *test_fp;
+
+	test_fp = fopen(file, "r");
+	if ( test_fp != NULL ) {
+		fclose(test_fp);
+		return(0);
+	}
+	return(-1);
+}
+#endif
+
+
+#include "doomdef.h"
+#include "doomstat.h"
+
+#include "dstrings.h"
+#include "sounds.h"
+
+
+#include "z_zone.h"
+#include "w_wad.h"
+#include "w_iwadid.h"		// content-based IWAD identification (lump signatures + MD5)
+#include "s_sound.h"
+#include "w_json.h"		// ID24 DEMOLOOP (JSON)
+#include "v_video.h"
+
+#include "f_finale.h"
+#include "f_wipe.h"
+
+#include "m_argv.h"
+#include "m_misc.h"
+#include "m_menu.h"
+#include "m_controls.h"		// in-game key-bindings screen (Options -> Controls)
+
+#include "i_system.h"
+#include "i_voice.h"		// I_Voice_ResolveWad (add buddydoom.wad early for its sprites)
+#include "i_sound.h"
+#include "i_video.h"
+
+#include "g_game.h"
+#include "heretic.h"		// Heretic_Init -- additive Heretic monsters
+#include "hexen.h"		// Hexen_Init   -- additive Hexen monsters
+#include "freedoom.h"		// Freedoom_Init -- cloned DOOM2 monsters (free art)
+#include "revmarine.h"		// RevMarine_Init -- (G) revived friendly marine actor
+#include "p_morph.h"		// Morph_Init -- (M) generic morph creature (chicken)
+#include "p_inv_heretic.h"	// HereticInv_Init -- (H) Heretic artifact pickups
+#include "g_agent.h"		// G_AgentInit -- full agent/LLM player control (-aiplayer)
+
+#include "hu_stuff.h"
+#include "wi_stuff.h"
+#include "st_stuff.h"
+#include "am_map.h"
+
+#include "p_setup.h"
+#include "p_ai_coop.h"
+#include "p_ai_director.h"
+#include "c_console.h"
+#include "i_udp.h"		// Chocolate/Crispy net: UDP + packet layer (-querychoc/-chocsyn)
+#include "d_netcl.h"		// Chocolate/Crispy net client (-connect/-netclient)
+#include "r_local.h"
+
+
+#include "d_main.h"
+
+//
+// D-DoomLoop()
+// Not a globally visible function,
+//  just included for source reference,
+//  called by D_DoomMain, never exits.
+// Manages timing and IO,
+//  calls all ?_Responder, ?_Ticker, and ?_Drawer,
+//  calls I_GetTime, I_StartFrame, and I_StartTic
+//
+void D_DoomLoop (void);
+
+
+char*		wadfiles[MAXWADFILES];
+
+// Set when playing DOOM1 with doom2stuff.wad auto-overlaid: enables the DOOM2
+// monsters (director) and the super shotgun even though doom.wad lacks the assets.
+int		doom2_overlay = 0;
+
+// -vanilla: purist 1993 mode (see doomstat.h).  Set in D_DoomMain from the parm.
+int		vanilla_mode = 0;
+
+// Set when the resolved IWAD is heretic.wad (Heretic game mode -- phase 1):
+// resolves map things through the Heretic doomednum table and skips unported ones.
+int		heretic_mode = 0;
+int		strife_mode  = 0;	// resolved IWAD is strife1.wad (gametype == GT_STRIFE)
+gametype_t	gametype = GT_DOOM;	// game family; set from the IWAD in D_DoomMain
+
+
+boolean		devparm;	// started game with -devparm
+boolean         nomonsters;	// checkparm of -nomonsters
+boolean         respawnparm;	// checkparm of -respawn
+boolean         fastparm;	// checkparm of -fast
+
+boolean         drone;
+
+boolean		singletics = false; // debug flag to cancel adaptiveness
+int		shotattic = 0;	    // -shotat <tic>: screenshot at this tic, then quit
+
+
+
+//extern int soundVolume;
+//extern  int	sfxVolume;
+//extern  int	musicVolume;
+
+extern  boolean	inhelpscreens;
+
+skill_t		startskill;
+int             startepisode;
+int		startmap;
+boolean		autostart;
+
+FILE*		debugfile;
+
+boolean		advancedemo;
+
+
+
+
+char		wadfile[1024];		// primary wad file
+char		mapdir[1024];           // directory of development maps
+char		basedefault[1024];      // default file
+
+
+void D_CheckNetGame (void);
+void D_ProcessEvents (void);
+void G_BuildTiccmd (ticcmd_t* cmd);
+void D_DoAdvanceDemo (void);
+
+
+//
+// EVENT HANDLING
+//
+// Events are asynchronous inputs generally generated by the game user.
+// Events can be discarded if no responder claims them
+//
+event_t         events[MAXEVENTS];
+int             eventhead;
+int 		eventtail;
+
+
+//
+// D_PostEvent
+// Called by the I/O functions when input is detected
+//
+void D_PostEvent (event_t* ev)
+{
+    events[eventhead] = *ev;
+    eventhead = (++eventhead)&(MAXEVENTS-1);
+}
+
+
+//
+// D_ProcessEvents
+// Send all the events of the given timestamp down the responder chain
+//
+void D_ProcessEvents (void)
+{
+    event_t*	ev;
+	
+    // IF STORE DEMO, DO NOT ACCEPT INPUT
+    if ( ( gamemode == commercial )
+	 && (W_CheckNumForName("map01")<0) )
+      return;
+	
+    for ( ; eventtail != eventhead ; eventtail = (++eventtail)&(MAXEVENTS-1) )
+    {
+	ev = &events[eventtail];
+	if (C_Responder (ev))
+	    continue;               // console ate the event
+	if (M_Controls_Responder (ev))
+	    continue;               // the Controls (key-bindings) screen ate the event
+	if (M_Video_Responder (ev))
+	    continue;               // the Video settings screen ate the event
+	if (M_Buddy_Responder (ev))
+	    continue;               // the Buddy select screen ate the event
+	if (M_Responder (ev))
+	    continue;               // menu ate the event
+	G_Responder (ev);
+    }
+}
+
+
+
+
+//
+// D_Display
+//  draw current display, possibly wiping it from the previous
+//
+
+// wipegamestate can be set to -1 to force a wipe on the next draw
+gamestate_t     wipegamestate = GS_DEMOSCREEN;
+extern  boolean setsizeneeded;
+extern  int             showMessages;
+void R_ExecuteSetViewSize (void);
+
+void D_Display (void)
+{
+    static  boolean		viewactivestate = false;
+    static  boolean		menuactivestate = false;
+    static  boolean		inhelpscreensstate = false;
+    static  boolean		fullscreen = false;
+    static  gamestate_t		oldgamestate = -1;
+    static  int			borderdrawcount;
+    int				nowtime;
+    int				tics;
+    int				wipestart;
+    int				y;
+    boolean			done;
+    boolean			wipe;
+    boolean			redrawsbar;
+
+    if (nodrawers)
+	return;                    // for comparative timing / profiling
+		
+    redrawsbar = false;
+    
+    // change the view size if needed
+    if (setsizeneeded)
+    {
+	R_ExecuteSetViewSize ();
+	oldgamestate = -1;                      // force background redraw
+	borderdrawcount = 3;
+    }
+
+    // save the current screen if about to wipe
+    if (gamestate != wipegamestate)
+    {
+	wipe = true;
+	wipe_StartScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
+    }
+    else
+	wipe = false;
+
+    if (gamestate == GS_LEVEL && gametic)
+	HU_Erase();
+    
+    // do buffered drawing
+    switch (gamestate)
+    {
+      case GS_LEVEL:
+	if (!gametic)
+	    break;
+	// Boom overlay draws the map AFTER the 3D view (below); vanilla/textured
+	// replace the view, so draw them here.
+	if (automapactive && !AM_Overlay ())
+	    AM_Drawer ();
+	if (wipe || (viewheight != SCREENHEIGHT && fullscreen) )
+	    redrawsbar = true;
+	if (inhelpscreensstate && !inhelpscreens)
+	    redrawsbar = true;              // just put away the help screen
+	if (menuactivestate)
+	    redrawsbar = true;             // the menu can overdraw the status bar
+					  //  (e.g. the 2x "Video" item) -- repaint it
+	// status bar is drawn *after* R_RenderPlayerView below -- in widescreen the
+	// view is full-height and would otherwise overwrite the centred bar.
+	break;
+
+      case GS_INTERMISSION:
+	WI_Drawer ();
+	break;
+
+      case GS_FINALE:
+	F_Drawer ();
+	break;
+
+      case GS_DEMOSCREEN:
+	D_PageDrawer ();
+	break;
+    }
+    
+    // draw buffered stuff to screen
+    I_UpdateNoBlit ();
+    
+    // draw the view directly -- also when the Boom automap overlay is up, so its
+    // transparent map lines draw over the live view instead of a black fill.
+    if (gamestate == GS_LEVEL && (!automapactive || AM_Overlay ()) && gametic)
+    {
+	// Safety: if the spied-on player (F12 spy mode) lost its body since we
+	// switched to it -- a co-op/AI buddy mid-death/reborn -- snap back to our
+	// own view rather than deref a NULL mo in R_SetupFrame.
+	if (!playeringame[displayplayer] || !players[displayplayer].mo)
+	    displayplayer = consoleplayer;
+	I_TrueColorClearView ();	// reset the 32-bit view fb before the drawers fill it
+	R_RenderPlayerView (&players[displayplayer]);
+	I_CaptureTrueColorView ();	// snapshot the 8-bit view before 2D overlays draw
+	R_DrawCrosshair ();		// over the 3D view, under the HUD/menu/console
+	{ extern void R_DrawDamageIndicators (void); R_DrawDamageIndicators (); }	// red directional hit ring
+
+	// Boom automap: overlay the map lines on top of the just-rendered view
+	// (AM_Drawer skips the background fill in this style).
+	if (AM_Overlay ())
+	    AM_Drawer ();
+    }
+
+    // Status bar, drawn AFTER the view: in widescreen the bar mode renders a
+    // full-height view (game beside the bar), so the bar must overlay it.  Minimal
+    // HUD (no bar) only when the view is full AND the user didn't ask for the bar
+    // (setblocks==11), so widescreen's full-height bar mode still shows the bar.
+    if (gamestate == GS_LEVEL && gametic)
+    {
+	extern int setblocks;
+	extern int statusbar_style;
+	if (heretic_mode)
+	{
+	    // Heretic honours the same Status Bar styles as DOOM, but with Heretic's
+	    // own art (the DOOM ST_DrawScaled/ST_DrawAltHUD use STBAR/STTNUM lumps that
+	    // aren't in heretic.wad): 1 = the Heretic bar scaled to 50%, 2 = a minimal
+	    // fullscreen HUD, else the full bar.  Styles 1/2 overlay a full-height view.
+	    extern void ST_HereticScaled (void), ST_HereticAltHUD (void);
+	    if (automapactive)			{ ST_Drawer (false, redrawsbar); fullscreen = false; }
+	    else if (statusbar_style == 1)	{ ST_HereticScaled (); fullscreen = true; }
+	    else if (statusbar_style == 2)	{ ST_HereticAltHUD (); fullscreen = true; }
+	    else				{ ST_Drawer (false, redrawsbar); fullscreen = false; }
+	}
+	else if (strife_mode)
+	{
+	    // Strife has its own bar (ST_StrifeDrawer, reached via ST_Drawer) but no scaled
+	    // / alt-HUD variants yet -- and ST_DrawScaled/ST_DrawAltHUD below use DOOM STBAR
+	    // / STTNUM art that strife1.wad lacks (they'd render a black bar full of '!').
+	    // So route EVERY Status Bar style through ST_Drawer, which draws the Strife bar.
+	    ST_Drawer (false, redrawsbar);
+	    fullscreen = false;
+	}
+	else if (gametype == GT_HEXEN)
+	{
+	    // Hexen, same as Strife above: it has its own bar (ST_HexenDrawer, reached
+	    // via ST_Drawer) and no scaled / alt-HUD variants, and the DOOM
+	    // ST_DrawScaled/ST_DrawAltHUD below draw STBAR/STTNUM art hexen.wad hasn't
+	    // got -- which is literally a black bar full of '!'.  Route every Status Bar
+	    // style through ST_Drawer.
+	    ST_Drawer (false, redrawsbar);
+	    fullscreen = false;
+	}
+	else if (statusbar_style == 1)	{ ST_DrawScaled (); fullscreen = true; }
+	else if (statusbar_style == 2)	{ ST_DrawAltHUD (); fullscreen = true; }
+	else
+	{
+	    boolean st_minimal = (viewheight == SCREENHEIGHT)
+				 && !(setblocks <= 10);
+	    boolean ws_bar = setblocks <= 10 && !st_minimal;
+	    ST_Drawer (st_minimal, redrawsbar || ws_bar);
+	    fullscreen = st_minimal;
+	}
+    }
+
+    if (gamestate == GS_LEVEL && gametic)
+	HU_Drawer ();
+    
+    // clean up border stuff
+    if (gamestate != oldgamestate && gamestate != GS_LEVEL)
+	I_SetPalette (W_CacheLumpName ("PLAYPAL",PU_CACHE));
+
+    // see if the border needs to be initially drawn
+    if (gamestate == GS_LEVEL && oldgamestate != GS_LEVEL)
+    {
+	viewactivestate = false;        // view was not active
+	R_FillBackScreen ();    // draw the pattern into the back screen
+    }
+
+    // see if the border needs to be updated to the screen
+    if (gamestate == GS_LEVEL && !automapactive && scaledviewwidth != SCREENWIDTH)
+    {
+	if (menuactive || menuactivestate || !viewactivestate)
+	    borderdrawcount = 3;
+	if (borderdrawcount)
+	{
+	    R_DrawViewBorder ();    // erase old menu stuff
+	    borderdrawcount--;
+	}
+
+    }
+
+    menuactivestate = menuactive;
+    viewactivestate = viewactive;
+    inhelpscreensstate = inhelpscreens;
+    oldgamestate = wipegamestate = gamestate;
+    
+    // draw pause pic
+    if (paused)
+    {
+	if (automapactive)
+	    y = 4;
+	else
+	    y = viewwindowy+4;
+	V_DrawPatchDirect(viewwindowx+(scaledviewwidth-68)/2,
+			  y,0,W_CacheLumpName ("M_PAUSE", PU_CACHE));
+    }
+
+
+    // menus go directly to the screen
+    M_Drawer ();          // menu is drawn even on top of everything
+    C_Drawer ();          // console overlays everything
+    NetUpdate ();         // send out any new accumulation
+
+
+    // normal update
+    if (!wipe)
+    {
+	I_FinishUpdate ();              // page flip or blit buffer
+	return;
+    }
+    
+    // wipe update
+    wipe_EndScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
+
+    wipestart = I_GetTime () - 1;
+
+    do
+    {
+	do
+	{
+	    nowtime = I_GetTime ();
+	    tics = nowtime - wipestart;
+	} while (!tics);
+	wipestart = nowtime;
+	done = wipe_ScreenWipe(wipe_Melt
+			       , 0, 0, SCREENWIDTH, SCREENHEIGHT, tics);
+	I_UpdateNoBlit ();
+	M_Drawer ();                            // menu is drawn even on top of wipes
+	I_FinishUpdate ();                      // page flip or blit buffer
+    } while (!done);
+}
+
+
+
+//
+//  D_DoomLoop
+//
+extern  boolean         demorecording;
+
+void D_DoomLoop (void)
+{
+    if (demorecording)
+	G_BeginRecording ();
+		
+    if (M_CheckParm ("-debugfile"))
+    {
+	char    filename[20];
+	sprintf (filename,"debug%i.txt",consoleplayer);
+	printf ("debug output to: %s\n",filename);
+	debugfile = fopen (filename,"w");
+    }
+	
+    I_InitGraphics ();
+
+    while (1)
+    {
+	// frame syncronous IO operations
+	I_StartFrame ();
+
+	// process one or more tics
+	if (singletics)
+	{
+	    I_StartTic ();
+	    if (shotattic > 0)
+	    {
+		// -shotat is meant to be reproducible, and singletics builds a ticcmd
+		// from LIVE input every frame -- so a stray focus change or a flick of
+		// the mouse over the window turns the player and the "identical" frame
+		// is not identical.  That is not hypothetical: it made 1 run in 4 differ
+		// from the other 3 and briefly looked like a rendering regression.
+		// Ignore input entirely for the duration of a capture.
+		memset (&netcmds[consoleplayer][maketic%BACKUPTICS], 0, sizeof(ticcmd_t));
+	    }
+	    else
+	    {
+		D_ProcessEvents ();
+		G_BuildTiccmd (&netcmds[consoleplayer][maketic%BACKUPTICS]);
+	    }
+	    if (advancedemo)
+		D_DoAdvanceDemo ();
+	    M_Ticker ();
+	    G_Ticker ();
+	    gametic++;
+	    maketic++;
+	}
+	else
+	{
+	    TryRunTics (); // will run at least one tic
+	}
+
+	S_UpdateSounds (players[consoleplayer].mo);// move positional sounds
+
+	// Update display, next frame, with current state.
+	D_Display ();
+
+	// -shotat <tic>: write a screenshot at a fixed GAMETIC, then quit.
+	//
+	// For verifying anything visual.  Grabbing the window after sleeping N
+	// seconds lands on a different tic every run -- monsters have moved, the
+	// palette is mid-damage-flash -- so two runs of the same scene differ
+	// everywhere and an A/B comparison says nothing.  Keyed on the tic instead,
+	// with singletics forcing one tic per frame (see D_DoomMain), the same tic
+	// renders the same pixels every time and a diff means what it claims.
+	if (shotattic > 0 && gametic >= shotattic)
+	{
+	    M_ScreenShot ();
+	    I_Quit ();
+	}
+    }
+}
+
+
+
+//
+//  DEMO LOOP
+//
+int             demosequence;
+int             pagetic;
+char                    *pagename;
+
+// ID24 DEMOLOOP: a JSON-defined title/demo sequence.  When present it replaces the
+// hardcoded intro loop in D_DoAdvanceDemo.  https://doomwiki.org/wiki/DEMOLOOP
+typedef struct { char primary[9], secondary[9]; int seconds, type, wipe; } demoloop_t;
+static demoloop_t*	demoloop;
+static int		numdemoloop;
+
+void D_LoadDemoLoop (void)
+{
+    int		lump = W_CheckNumForName ("DEMOLOOP");
+    json_t*	root;
+    json_t*	data;
+    json_t*	entries;
+    int		i;
+
+    if (lump < 0) return;
+    root = JSON_Parse ((const char*) W_CacheLumpNum (lump, PU_CACHE), W_LumpLength (lump));
+    if (!root) { fprintf (stderr, "DEMOLOOP: JSON parse error -- ignored.\n"); return; }
+
+    data    = JSON_Get (root, "data");
+    entries = JSON_Get (data ? data : root, "entries");	// standard wraps in "data"
+    if (entries && entries->type == JSON_ARR && entries->n > 0)
+    {
+	demoloop = malloc (entries->n * sizeof *demoloop);
+	for (i = 0; i < entries->n; i++)
+	{
+	    json_t*	e = JSON_Index (entries, i);
+	    demoloop_t*	d = &demoloop[numdemoloop];
+	    memset (d, 0, sizeof *d);
+	    { const char* s = JSON_Str (JSON_Get (e, "primarylump"));   int k; for (k=0;k<8&&s[k];k++) d->primary[k]  =(char)toupper((unsigned char)s[k]); }
+	    { const char* s = JSON_Str (JSON_Get (e, "secondarylump")); int k; for (k=0;k<8&&s[k];k++) d->secondary[k]=(char)toupper((unsigned char)s[k]); }
+	    d->seconds = (int) JSON_Num (JSON_Get (e, "duration"), 0);
+	    d->type    = (int) JSON_Num (JSON_Get (e, "type"),     0);
+	    d->wipe    = (int) JSON_Num (JSON_Get (e, "outrowipe"),1);
+	    if (d->primary[0]) numdemoloop++;
+	}
+    }
+    JSON_Free (root);
+    if (numdemoloop) printf ("DEMOLOOP: %d entry(ies) -> custom title/demo loop.\n", numdemoloop);
+}
+
+// Case-insensitive string equality (portable; avoids strcasecmp).
+static boolean D_EqCI (const char* a, const char* b)
+{
+    while (*a && *b) { if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false; a++; b++; }
+    return *a == *b;
+}
+
+// Set when a GAMECONF declares `executable: id24` (i.e. we are actually playing a
+// Legacy-of-Rust / ID24-target set, not plain DOOM2 with id24res.wad merely
+// auto-overlaid).  Used to auto-enable the ID24 SBARDEF status bar (st_sbardef.c).
+int	gameconf_id24 = 0;
+
+// ID24 GAMECONF: a JSON manifest of general WAD info + engine settings.
+// https://doomwiki.org/wiki/GAMECONF  Most fields are frontend/launcher metadata
+// (iwad/pwads/executable/playertranslations/options); the engine here applies the
+// behavioural `mode` (game mode) and logs the descriptive fields.
+void D_LoadGameConf (void)
+{
+    int		lump = W_CheckNumForName ("GAMECONF");
+    json_t*	root;
+    json_t*	data;
+
+    if (lump < 0) return;
+    root = JSON_Parse ((const char*) W_CacheLumpNum (lump, PU_CACHE), W_LumpLength (lump));
+    if (!root) { fprintf (stderr, "GAMECONF: JSON parse error -- ignored.\n"); return; }
+
+    data = JSON_Get (root, "data");
+    if (data)
+    {
+	const char* title  = JSON_Str (JSON_Get (data, "title"));
+	const char* author = JSON_Str (JSON_Get (data, "author"));
+	const char* exe    = JSON_Str (JSON_Get (data, "executable"));
+	const char* mode   = JSON_Str (JSON_Get (data, "mode"));
+
+	if (title[0])
+	    printf ("GAMECONF: \"%s\"%s%s\n", title, author[0] ? " by " : "", author);
+	if (exe[0])
+	{
+	    printf ("GAMECONF: executable target = %s\n", exe);
+	    if (D_EqCI (exe, "id24")) gameconf_id24 = 1;
+	}
+	if (mode[0])
+	{
+	    extern GameMode_t gamemode;
+	    if      (D_EqCI (mode, "commercial")) gamemode = commercial;
+	    else if (D_EqCI (mode, "retail"))     gamemode = retail;
+	    else if (D_EqCI (mode, "registered")) gamemode = registered;
+	    else if (D_EqCI (mode, "shareware"))  gamemode = shareware;
+	    printf ("GAMECONF: game mode -> %s\n", mode);
+	}
+	// iwad / pwads / executable / playertranslations / options: launcher-level or
+	// deferred (frontend selects WADs; translations/compat flags not yet wired).
+    }
+    JSON_Free (root);
+}
+
+
+//
+// D_PageTicker
+// Handles timing for warped projection
+//
+void D_PageTicker (void)
+{
+    if (--pagetic < 0)
+	D_AdvanceDemo ();
+}
+
+
+
+//
+// D_PageDrawer
+//
+void D_PageDrawer (void)
+{
+    int lump = (pagename && *pagename) ? W_CheckNumForName (pagename) : -1;
+    if (lump < 0)			// missing page lump (e.g. DOOM's TITLEPIC in a Heretic IWAD)
+	lump = W_CheckNumForName (heretic_mode ? "TITLE" : "TITLEPIC");
+    if (lump < 0)
+	return;				// nothing drawable -- don't crash on a missing lump
+
+    // The page graphics (TITLEPIC / CREDIT / HELP) are 4:3 (320 wide).  Heretic's are RAW
+    // 320x200 dumps (64000 bytes), not patches -- V_DrawRawScreen handles those (and its own
+    // widescreen centring/pillarbox); DOOM's are patches, centred with WIDESCREENDELTA.
+    if (W_LumpLength (lump) == 64000)
+	V_DrawRawScreen (lump);
+    else
+    {
+	if (WIDESCREENDELTA)
+	    memset (screens[0], 0, SCREENWIDTH*SCREENHEIGHT);
+	V_DrawPatch (WIDESCREENDELTA, 0, 0, W_CacheLumpNum (lump, PU_CACHE));
+    }
+}
+
+
+//
+// D_AdvanceDemo
+// Called after each demo or intro demosequence finishes
+//
+void D_AdvanceDemo (void)
+{
+    advancedemo = true;
+}
+
+
+//
+// This cycles through the demo sequences.
+// FIXME - version dependend demo numbers?
+//
+ void D_DoAdvanceDemo (void)
+{
+    players[consoleplayer].playerstate = PST_LIVE;  // not reborn
+    advancedemo = false;
+    usergame = false;               // no save / end game here
+    paused = false;
+    gameaction = ga_nothing;
+
+    // ID24 DEMOLOOP: cycle the JSON-defined entries instead of the hardcoded loop.
+    if (numdemoloop > 0)
+    {
+	demoloop_t* e;
+	demosequence = (demosequence + 1) % numdemoloop;
+	e = &demoloop[demosequence];
+	if (e->type == 1)			// demo lump
+	    G_DeferedPlayDemo (e->primary);
+	else					// art screen
+	{
+	    gamestate = GS_DEMOSCREEN;
+	    pagename  = e->primary;		// stable storage in the demoloop[] array
+	    pagetic   = (e->seconds > 0 ? e->seconds : 5) * TICRATE;
+	    if (e->secondary[0])
+		S_ChangeMusicByName (e->secondary, false);
+	}
+	return;
+    }
+
+    // Heretic: its title/credit lumps differ from DOOM's (TITLE, not TITLEPIC) and
+    // the stock DOOM demos are cross-incompatible with this additive-actor playsim,
+    // so cycle just the title + credit pages instead of the DOOM demo loop.
+    if (heretic_mode)
+    {
+	demosequence = (demosequence + 1) % 2;
+	gamestate = GS_DEMOSCREEN;
+	if (demosequence == 0)
+	{
+	    pagename = "TITLE";  pagetic = 170;
+	    S_ChangeMusicByName ("MUS_TITL", false);	// Heretic title music (silent if absent)
+	}
+	else
+	{
+	    pagename = "CREDIT"; pagetic = 200;
+	}
+	return;
+    }
+
+    if ( gamemode == retail )
+      demosequence = (demosequence+1)%7;
+    else
+      demosequence = (demosequence+1)%6;
+
+    switch (demosequence)
+    {
+      case 0:
+	if ( gamemode == commercial )
+	    pagetic = 35 * 11;
+	else
+	    pagetic = 170;
+	gamestate = GS_DEMOSCREEN;
+	pagename = "TITLEPIC";
+	if ( gamemode == commercial )
+	  S_StartMusic(mus_dm2ttl);
+	else
+	  S_StartMusic (mus_intro);
+	break;
+      case 1:
+	G_DeferedPlayDemo ("demo1");
+	break;
+      case 2:
+	pagetic = 200;
+	gamestate = GS_DEMOSCREEN;
+	pagename = "CREDIT";
+	break;
+      case 3:
+	G_DeferedPlayDemo ("demo2");
+	break;
+      case 4:
+	gamestate = GS_DEMOSCREEN;
+	if ( gamemode == commercial)
+	{
+	    pagetic = 35 * 11;
+	    pagename = "TITLEPIC";
+	    S_StartMusic(mus_dm2ttl);
+	}
+	else
+	{
+	    pagetic = 200;
+
+	    if ( gamemode == retail )
+	      pagename = "CREDIT";
+	    else
+	      pagename = "HELP2";
+	}
+	break;
+      case 5:
+	G_DeferedPlayDemo ("demo3");
+	break;
+        // THE DEFINITIVE DOOM Special Edition demo
+      case 6:
+	G_DeferedPlayDemo ("demo4");
+	break;
+    }
+}
+
+
+
+//
+// D_StartTitle
+//
+void D_StartTitle (void)
+{
+    gameaction = ga_nothing;
+    demosequence = -1;
+    D_AdvanceDemo ();
+}
+
+
+
+
+//      print title for every printed line
+char            title[128];
+
+
+
+//
+// D_AddFile
+//
+void D_AddFile (char *file)
+{
+    int     numwadfiles;
+    char    *newfile;
+	
+    for (numwadfiles = 0 ; wadfiles[numwadfiles] ; numwadfiles++)
+	;
+
+    newfile = malloc (strlen(file)+1);
+    strcpy (newfile, file);
+
+    wadfiles[numwadfiles] = newfile;
+}
+
+// ---------------------------------------------------------------------------
+//  Auto-discover buddy WADs.  Any *.wad in ID0/ that carries a BUDDYDEF lump is
+//  loaded early (before W_InitMultipleFiles), so a modder buddy pack dropped into
+//  ID0/ appears in the Buddy menu with no -file needed.  WADs already on the command
+//  line (or auto-loaded) are skipped, so a buddy is never registered twice.
+// ---------------------------------------------------------------------------
+
+// Peek a WAD's directory (no full load) for an 8-char lump name.
+static boolean D_WadHasLump (const char* path, const char* lump)
+{
+    FILE*		f = fopen (path, "rb");
+    unsigned char	hdr[12], e[16];
+    unsigned		n, of, i;
+    boolean		found = false;
+    if (!f) return false;
+    if (fread (hdr, 1, 12, f) == 12
+	&& (!memcmp (hdr, "PWAD", 4) || !memcmp (hdr, "IWAD", 4)))
+    {
+	n  = hdr[4] | hdr[5]<<8 | hdr[6]<<16 | ((unsigned)hdr[7]<<24);
+	of = hdr[8] | hdr[9]<<8 | hdr[10]<<16 | ((unsigned)hdr[11]<<24);
+	if (n && n <= 100000 && fseek (f, (long)of, SEEK_SET) == 0)
+	    for (i = 0; i < n && !found; i++)
+	    {
+		if (fread (e, 1, 16, f) != 16) break;
+		if (!strncasecmp ((char*)e + 8, lump, 8)) found = true;
+	    }
+    }
+    fclose (f);
+    return found;
+}
+
+// Is a WAD with this basename already in wadfiles[] (loaded / on the command line)?
+static boolean D_WadAlreadyLoaded (const char* base)
+{
+    int i;
+    for (i = 0; wadfiles[i]; i++)
+    {
+	const char* w = wadfiles[i];
+	const char* s = strrchr (w, '/');
+	const char* b = strrchr (w, '\\');
+	if (b > s) s = b;
+	s = s ? s + 1 : w;
+	if (!strcasecmp (s, base)) return true;
+    }
+    return false;
+}
+
+static void D_AutoloadBuddyWads (void)
+{
+    char path[300];
+#ifdef _WIN32
+    struct _finddata_t	fd;
+    intptr_t		h = _findfirst ("ID0\\*.wad", &fd);
+    if (h == -1) return;
+    do {
+	if (fd.attrib & _A_SUBDIR) continue;
+	if (D_WadAlreadyLoaded (fd.name)) continue;
+	snprintf (path, sizeof path, "ID0/%s", fd.name);
+	if (D_WadHasLump (path, "BUDDYDEF"))
+	{ D_AddFile (fd.name); printf ("Buddy WAD: %s -> auto-loaded (has BUDDYDEF)\n", fd.name); }
+    } while (_findnext (h, &fd) == 0);
+    _findclose (h);
+#else
+    DIR*		d = opendir ("ID0");
+    struct dirent*	de;
+    if (!d) return;
+    while ((de = readdir (d)))
+    {
+	size_t L = strlen (de->d_name);
+	if (L <= 4 || strcasecmp (de->d_name + L - 4, ".wad")) continue;
+	if (D_WadAlreadyLoaded (de->d_name)) continue;
+	snprintf (path, sizeof path, "ID0/%s", de->d_name);
+	if (D_WadHasLump (path, "BUDDYDEF"))
+	{ D_AddFile (de->d_name); printf ("Buddy WAD: %s -> auto-loaded (has BUDDYDEF)\n", de->d_name); }
+    }
+    closedir (d);
+#endif
+}
+
+//
+// IdentifyVersion
+// Checks availability of IWAD files by name,
+// to determine whether registered/commercial features
+// should be executed (notably loading PWAD's).
+//
+// Known IWAD filenames in detection priority, with the game mode they imply.
+static const struct { const char* name; int mode; } known_iwads[] = {
+    { "doom2.wad",     commercial },
+    { "plutonia.wad",  commercial },
+    { "tnt.wad",       commercial },
+    { "doomu.wad",     retail     },
+    { "doom.wad",      registered },
+    { "doom1.wad",     shareware  },
+    { "freedoom2.wad", commercial },
+    { "freedoom1.wad", retail     },
+    { "freedm.wad",    commercial },
+    { "chex3.wad",     retail     },	// Chex Quest 3 (Ultimate-Doom format)
+    { "blasphemer.wad",retail     },	// Blasphemer (free Heretic IWAD: ExMy episodes)
+    { "blasphem.wad",  retail     },	// ... and the 8.3 name it actually ships under
+};
+
+// Steam install locations (relative to steamapps/common) + game mode.
+static const struct { const char* rel; int mode; } steam_iwads[] = {
+    { "Ultimate Doom/base/DOOM.WAD",       retail     },
+    { "Ultimate Doom/rerelease/DOOM.WAD",  retail     },
+    { "Ultimate Doom/base/doom.wad",       retail     },
+    { "DOOM 2/base/DOOM2.WAD",             commercial },
+    { "Doom 2/base/DOOM2.WAD",             commercial },
+    { "Doom 2/finaldoombase/TNT.WAD",      commercial },
+    { "Doom 2/finaldoombase/PLUTONIA.WAD", commercial },
+    { "Final Doom/base/TNT.WAD",           commercial },
+    { "Final Doom/base/PLUTONIA.WAD",      commercial },
+};
+
+static char* IWAD_Strdup (const char* s)
+{
+    char* d = malloc(strlen(s)+1);
+    if (d) strcpy(d, s);
+    return d;
+}
+
+// Read a value for "key" from buddydoom.cfg (working dir). Returns 1 if found.
+static int IWAD_CfgGet (const char* key, char* out, int n)
+{
+    FILE* f = fopen("buddydoom.cfg", "r");
+    char line[256], k[64], v[192];
+    int found = 0;
+    if (!f) return 0;
+    while (fgets(line, sizeof(line), f))
+    {
+	if (sscanf(line, " %63s %191[^\n]", k, v) == 2 && !strcmp(k, key))
+	{
+	    char* p = v; int L = (int)strlen(p);
+	    if (L >= 2 && p[0]=='"' && p[L-1]=='"') { p[L-1]=0; p++; }
+	    strncpy(out, p, n-1); out[n-1]=0; found = 1;
+	}
+    }
+    fclose(f);
+    return found;
+}
+
+// Best-effort game mode from an IWAD path's basename.
+static int IWAD_ModeFromName (const char* path)
+{
+    const char* b = path; const char* s;
+    char low[64]; int i, c;
+    if ((s = strrchr(b,'/')))  b = s+1;
+    if ((s = strrchr(b,'\\'))) b = s+1;
+    for (i=0; b[i] && i<63; i++) { c = b[i]; if (c>='A'&&c<='Z') c+=32; low[i]=(char)c; }
+    low[i] = 0;
+    if (strstr(low,"heretic") || strstr(low,"blasphem")) return retail;	// Heretic / Blasphemer (ExMy, multi-episode)
+    if (strstr(low,"chex")) return retail;		// Chex Quest (1/2/3): Ultimate-Doom format
+    if (strstr(low,"doom2") || strstr(low,"plutonia") || strstr(low,"tnt")
+	|| strstr(low,"freedoom2") || strstr(low,"freedm")) return commercial;
+    if (strstr(low,"doomu") || strstr(low,"freedoom1")) return retail;
+    if (strstr(low,"doom1")) return shareware;
+    if (strstr(low,"doom"))  return registered;
+    return commercial;
+}
+
+// Identify the IWAD by its CONTENT (lump signatures + MD5 table, w_iwadid.h) and map
+// to a gamemode.  Robust to renamed/custom IWADs; returns `indetermined` (use the
+// filename guess) only when the file isn't a recognisable IWAD.  `label` (optional)
+// receives a human version string, e.g. "The Ultimate Doom (v1.9)".
+// `id_out` (optional) receives the raw game id, for the callers that need to know WHICH
+// game it is (Heretic family -> heretic_mode), not just its map/episode format.
+static int IWAD_ModeFromContent (const char* path, char* label, int cap, iwid_t* id_out)
+{
+    iwid_t id = IWID_Identify (path, label, cap, NULL);
+
+    if (id_out) *id_out = id;
+    switch (id)
+    {
+      case IWID_DOOM_SW:                    return shareware;
+      case IWID_DOOM_REG:                   return registered;
+      case IWID_DOOM_ULTIMATE:
+      case IWID_FREEDOOM1:
+      case IWID_HERETIC:
+      case IWID_BLASPHEMER:
+      case IWID_CHEX3:                      return retail;
+      case IWID_DOOM2:     case IWID_PLUTONIA:
+      case IWID_TNT:       case IWID_FREEDOOM2:
+      case IWID_FREEDM:    case IWID_HEXEN:
+      case IWID_STRIFE:                     return commercial;
+      default:                              return indetermined;
+    }
+}
+
+// Does the IWAD file contain a lump with this (<=8 char, uppercase) name?  Reads the WAD
+// directory straight off disk -- IdentifyVersion runs before W_Init, so W_CheckNumForName
+// isn't available yet.  Used to tell the Ultimate Doom (has E4M1) from the registered
+// doom.wad (doesn't): same filename, only the content differs.
+static int IWAD_FileHasLump (const char* path, const char* lump)
+{
+    FILE* f = fopen (path, "rb");
+    unsigned char hdr[12]; int found = 0;
+    if (!f) return 0;
+    if (fread (hdr, 1, 12, f) == 12)
+    {
+	unsigned numl = hdr[4] | hdr[5]<<8 | hdr[6]<<16 | (unsigned)hdr[7]<<24;
+	unsigned ofs  = hdr[8] | hdr[9]<<8 | hdr[10]<<16 | (unsigned)hdr[11]<<24;
+	if (numl && numl <= 100000 && fseek (f, (long)ofs, SEEK_SET) == 0)
+	{
+	    unsigned char e[16]; unsigned i;
+	    for (i = 0; i < numl && !found; i++)
+	    {
+		if (fread (e, 1, 16, f) != 16) break;
+		if (strncmp ((char*)e + 8, lump, 8) == 0) found = 1;
+	    }
+	}
+    }
+    fclose (f);
+    return found;
+}
+
+//
+// IdentifyVersion
+// Locate an IWAD and set the game mode.  Search order:
+//   -iwad <file>  >  "iwad" in buddydoom.cfg  >  iwads/  >  .  >  $DOOMWADDIR  >  Steam
+//
+void IdentifyVersion (void)
+{
+    char	path[1024];
+    char	cfgval[512];
+    int		mode = indetermined;
+    char*	found = NULL;
+    char*	doomwaddir;
+    int		i, d, r, p;
+
+    doomwaddir = getenv("DOOMWADDIR");
+
+    // Single config file in the working directory (next to the binary).
+    strcpy (basedefault, "buddydoom.cfg");
+
+    if (M_CheckParm ("-shdev"))
+    {
+	gamemode = shareware; devparm = true;
+	D_AddFile (DEVDATA"doom1.wad");
+	D_AddFile (DEVMAPS"data_se/texture1.lmp");
+	D_AddFile (DEVMAPS"data_se/pnames.lmp");
+	strcpy (basedefault,DEVDATA"default.cfg");
+	return;
+    }
+    if (M_CheckParm ("-regdev"))
+    {
+	gamemode = registered; devparm = true;
+	D_AddFile (DEVDATA"doom.wad");
+	D_AddFile (DEVMAPS"data_se/texture1.lmp");
+	D_AddFile (DEVMAPS"data_se/texture2.lmp");
+	D_AddFile (DEVMAPS"data_se/pnames.lmp");
+	strcpy (basedefault,DEVDATA"default.cfg");
+	return;
+    }
+    if (M_CheckParm ("-comdev"))
+    {
+	gamemode = commercial; devparm = true;
+	D_AddFile (DEVDATA"doom2.wad");
+	D_AddFile (DEVMAPS"cdata/texture1.lmp");
+	D_AddFile (DEVMAPS"cdata/pnames.lmp");
+	strcpy (basedefault,DEVDATA"default.cfg");
+	return;
+    }
+
+    // 1) explicit -iwad <file>  (try as-given, then under ID0/)
+    p = M_CheckParm ("-iwad");
+    if (p && p < myargc-1)
+    {
+	char id0[1024];
+	snprintf (id0, sizeof(id0), "ID0/%s", myargv[p+1]);
+	if      (!access (myargv[p+1], R_OK)) found = IWAD_Strdup (myargv[p+1]);
+	else if (!access (id0,         R_OK)) found = IWAD_Strdup (id0);
+	if (found) mode = IWAD_ModeFromName (found);
+    }
+
+    // 2) "iwad <path>" from buddydoom.cfg (written by the config app)
+    if (!found && IWAD_CfgGet ("iwad", cfgval, sizeof(cfgval)) && cfgval[0])
+    {
+	char id0[1024];
+	snprintf (id0, sizeof(id0), "ID0/%s", cfgval);
+	if      (!access (cfgval, R_OK)) found = IWAD_Strdup (cfgval);
+	else if (!access (id0,    R_OK)) found = IWAD_Strdup (id0);
+	if (found) mode = IWAD_ModeFromName (found);
+    }
+
+    // 3) known names in:  iwads/  ->  .  ->  $DOOMWADDIR  (plus french doom2f.wad)
+    if (!found)
+    {
+	const char* dirs[4]; int nd = 0;
+	dirs[nd++] = "ID0";		// all game WADs live in run/ID0/ (refactor)
+	dirs[nd++] = "iwads";
+	dirs[nd++] = ".";
+	if (doomwaddir && strcmp (doomwaddir, ".")) dirs[nd++] = doomwaddir;
+
+	for (d=0; !found && d<nd; d++)
+	{
+	    snprintf (path, sizeof(path), "%s/doom2f.wad", dirs[d]);
+	    if (!access (path, R_OK))
+	    {
+		found = IWAD_Strdup (path); mode = commercial;
+		language = french; printf ("French version\n");
+		break;
+	    }
+	    for (i=0; i < (int)(sizeof(known_iwads)/sizeof(known_iwads[0])); i++)
+	    {
+		snprintf (path, sizeof(path), "%s/%s", dirs[d], known_iwads[i].name);
+		if (!access (path, R_OK))
+		{ found = IWAD_Strdup (path); mode = known_iwads[i].mode; break; }
+	    }
+	}
+    }
+
+    // 4) Steam install locations
+    if (!found)
+    {
+	// Default Steam library "common" folder, per OS.  We only probe the
+	// default library (extra library folders on other drives live in
+	// libraryfolders.vdf, which we don't parse) -- drop the IWAD in iwads/
+	// if Steam installed it elsewhere.
+	char roots[8][512]; int nr = 0;
+	char* home = getenv ("HOME");
+#if defined(__APPLE__)
+	if (home)
+	    snprintf (roots[nr++], 512, "%s/Library/Application Support/Steam/steamapps/common", home);
+#elif defined(_WIN32)
+	snprintf (roots[nr++], 512, "C:/Program Files (x86)/Steam/steamapps/common");
+	snprintf (roots[nr++], 512, "C:/Program Files/Steam/steamapps/common");
+#else	/* Linux / *BSD */
+	if (home)
+	{
+	    snprintf (roots[nr++], 512, "%s/.steam/steam/steamapps/common", home);
+	    snprintf (roots[nr++], 512, "%s/.local/share/Steam/steamapps/common", home);
+	    snprintf (roots[nr++], 512, "%s/.steam/root/steamapps/common", home);
+	    // Flatpak Steam (com.valvesoftware.Steam) sandboxed data dir.
+	    snprintf (roots[nr++], 512, "%s/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common", home);
+	}
+#endif
+
+	for (i=0; !found && i < (int)(sizeof(steam_iwads)/sizeof(steam_iwads[0])); i++)
+	    for (r=0; r<nr; r++)
+	    {
+		snprintf (path, sizeof(path), "%s/%s", roots[r], steam_iwads[i].rel);
+		if (!access (path, R_OK))
+		{ found = IWAD_Strdup (path); mode = steam_iwads[i].mode; break; }
+	    }
+    }
+
+    if (found)
+    {
+	char	lbl[80];
+	iwid_t	iwid = IWID_NONE;
+	int	cm;
+
+	printf ("IWAD: %s\n", found);
+	// Content-first: identify the IWAD by its lumps / MD5 (w_iwadid.h) and let that
+	// override the filename guess -- so a renamed or custom IWAD is still recognised.
+	lbl[0] = 0;
+	cm = IWAD_ModeFromContent (found, lbl, sizeof lbl, &iwid);
+	if (cm != indetermined) { mode = cm; printf ("IWAD identified by content: %s\n", lbl); }
+
+	// Heretic game mode (phase 1): treat the Heretic family (Heretic, Blasphemer) as a
+	// multi-episode game (retail's 4-episode menu is fine for now) and route map things
+	// through the Heretic doomednum table.  Driven by the CONTENT id, so a Heretic IWAD
+	// under any name (blasphem.wad, a renamed heretic.wad) is caught; the name test is
+	// only the fallback for a file IWID_Identify couldn't read.
+	{
+	    const char* b = found; const char* s; char low[256]; int i, c;
+	    if ((s = strrchr(b,'/')))  b = s+1;
+	    if ((s = strrchr(b,'\\'))) b = s+1;
+	    for (i=0; b[i] && i<255; i++) { c=b[i]; if (c>='A'&&c<='Z') c+=32; low[i]=(char)c; }
+	    low[i] = 0;
+	    if (iwid == IWID_HERETIC || iwid == IWID_BLASPHEMER
+		|| (iwid == IWID_NONE && (strstr(low, "heretic") || strstr(low, "blasphem"))))
+	    {
+		heretic_mode = 1;
+		gametype = GT_HERETIC;		// heretic_mode kept in sync (bridge)
+		mode = retail;
+		printf ("%s IWAD detected -- heretic mode\n",
+			lbl[0] ? lbl : (strstr(low, "blasphem") ? "Blasphemer" : "Heretic"));
+	    }
+	    else if (iwid == IWID_STRIFE
+		     || (iwid == IWID_NONE && strstr (low, "strife")))
+	    {
+		strife_mode = 1;
+		gametype = GT_STRIFE;
+		mode = commercial;		// Strife uses the Doom II MAPxx format
+		printf ("%s IWAD detected -- strife mode\n", lbl[0] ? lbl : "Strife");
+	    }
+	    else if (iwid == IWID_HEXEN
+		     || (iwid == IWID_NONE && strstr (low, "hexen")))
+	    {
+		// gametype was never set for Hexen, so every `gametype == GT_HEXEN`
+		// branch in the engine was dead code and hexen.wad fell through the
+		// DOOM paths -- which is why it died loading DOOM's status-bar art.
+		gametype = GT_HEXEN;
+		mode = commercial;		// Hexen uses the Doom II MAPxx format
+		printf ("%s IWAD detected -- hexen mode\n", lbl[0] ? lbl : "Hexen");
+	    }
+	}
+	// doom.wad is BOTH the registered (3-episode) and the Ultimate/retail (4-episode) IWAD --
+	// same filename, only the content differs.  If a "registered" doom.wad actually has an
+	// E4M1 map it's the Ultimate Doom -> upgrade to retail so the 4th episode shows in the menu.
+	if (mode == registered && IWAD_FileHasLump (found, "E4M1"))
+	{
+	    mode = retail;
+	    printf ("IWAD contains E4M1 -> Ultimate Doom (retail): 4 episodes\n");
+	}
+	gamemode = mode;
+	D_AddFile (found);
+	// A Doom-1-format IWAD lacks the DOOM2-exclusive monsters and the super shotgun,
+	// so overlay the matching *2stuff.wad if one is on hand -- then the director can
+	// spawn them and wp_supershotgun works.  (W_AddFile resolves the bare name under
+	// ID0/.)  The pack must MATCH THE GAME: doom2stuff.wad carries id Software art, so
+	// it belongs only on Doom 1 / shareware Doom, and Freedoom Phase 1 gets
+	// freedoom2stuff.wad instead -- overlaying id sprites on Freedoom would mix two
+	// completely different art styles.  Gate on the CONTENT id, not "anything that is
+	// not commercial": that old test also caught Freedoom Phase 1 (4 episodes, so it
+	// has E4M1 and was even mis-identified as The Ultimate Doom) and would catch any
+	// future Doom1-format game.
+	{
+	    const char* pack =
+		  (iwid == IWID_DOOM_SW || iwid == IWID_DOOM_REG || iwid == IWID_DOOM_ULTIMATE)
+		      ? "doom2stuff.wad"
+		: (iwid == IWID_FREEDOOM1) ? "freedoom2stuff.wad"
+		: NULL;
+	
+	    if (pack && mode != commercial && !heretic_mode && !strife_mode)
+	    {
+		char id0path[64];
+		snprintf (id0path, sizeof id0path, "ID0/%s", pack);
+		if (!access (id0path, R_OK) || !access (pack, R_OK))
+		{
+		    D_AddFile (pack);
+		    doom2_overlay = 1;
+		    printf ("DOOM2 overlay: %s -> DOOM2 monsters + super shotgun enabled\n", pack);
+		}
+	    }
+	}
+	return;
+    }
+
+    printf ("Game mode indeterminate -- no IWAD found "
+	    "(looked in iwads/, ., $DOOMWADDIR, Steam).\n");
+    gamemode = indetermined;
+}
+
+//
+// Find a Response File
+//
+void FindResponseFile (void)
+{
+    int             i;
+#define MAXARGVS        100
+	
+    for (i = 1;i < myargc;i++)
+	if (myargv[i][0] == '@')
+	{
+	    FILE *          handle;
+	    int             size;
+	    int             k;
+	    int             index;
+	    int             indexinfile;
+	    char    *infile;
+	    char    *file;
+	    char    *moreargs[20];
+	    char    *firstargv;
+			
+	    // READ THE RESPONSE FILE INTO MEMORY
+	    handle = fopen (&myargv[i][1],"rb");
+	    if (!handle)
+	    {
+		printf ("\nNo such response file!");
+		exit(1);
+	    }
+	    printf("Found response file %s!\n",&myargv[i][1]);
+	    fseek (handle,0,SEEK_END);
+	    size = ftell(handle);
+	    fseek (handle,0,SEEK_SET);
+	    file = malloc (size);
+	    fread (file,size,1,handle);
+	    fclose (handle);
+			
+	    // KEEP ALL CMDLINE ARGS FOLLOWING @RESPONSEFILE ARG
+	    for (index = 0,k = i+1; k < myargc; k++)
+		moreargs[index++] = myargv[k];
+			
+	    firstargv = myargv[0];
+	    myargv = malloc(sizeof(char *)*MAXARGVS);
+	    memset(myargv,0,sizeof(char *)*MAXARGVS);
+	    myargv[0] = firstargv;
+			
+	    infile = file;
+	    indexinfile = k = 0;
+	    indexinfile++;  // SKIP PAST ARGV[0] (KEEP IT)
+	    do
+	    {
+		myargv[indexinfile++] = infile+k;
+		while(k < size &&
+		      ((*(infile+k)>= ' '+1) && (*(infile+k)<='z')))
+		    k++;
+		*(infile+k) = 0;
+		while(k < size &&
+		      ((*(infile+k)<= ' ') || (*(infile+k)>'z')))
+		    k++;
+	    } while(k < size);
+			
+	    for (k = 0;k < index;k++)
+		myargv[indexinfile++] = moreargs[k];
+	    myargc = indexinfile;
+	
+	    // DISPLAY ARGS
+	    printf("%d command-line args:\n",myargc);
+	    for (k=1;k<myargc;k++)
+		printf("%s\n",myargv[k]);
+
+	    break;
+	}
+}
+
+
+//
+// D_DoomMain
+//
+//
+// D_PrintHelp
+// Print every command-line flag buddydoom understands, grouped, then the caller
+// exits.  Triggered by -help / -h / -? / /?.  Keep in sync with BUDDYDOOM_PARAMETERS.md.
+//
+static void D_PrintHelp (void)
+{
+    puts (
+"buddydoom -- SDL3 DOOM with an AI co-op buddy + LLM monster director.\n"
+"Usage: buddydoom [options]   (bring your own IWAD)\n"
+"\n"
+"GAME / LEVEL\n"
+"  -iwad <file>      IWAD to use (doom/doom2/plutonia/tnt/freedoom*); else auto-detect\n"
+"  -file <wad>...    load extra PWAD(s) over the IWAD (repeatable)\n"
+"  -warp <e> <m>     jump to episode/map (commercial: -warp <map>); default 1 1\n"
+"  -episode <n>      start episode (registered/retail)\n"
+"  -skill <1-5>      1 ITYTD .. 4 UV .. 5 Nightmare (default 3)\n"
+"  -nomonsters       spawn no monsters\n"
+"  -respawn          monsters respawn after death\n"
+"  -fast             fast monsters\n"
+"  -turbo <%>        player speed percent (default 100)\n"
+"  -loadgame <slot>  load a saved game on startup\n"
+"\n"
+"VIDEO\n"
+"  -2 / -3 / -4      resolution scale 2..4 (640x400 .. 1280x800)\n"
+"  -render <2-7>     resolution scale (overrides -2..-4)\n"
+"  -fullscreen       force fullscreen        -window      force windowed\n"
+"  -nomouse          disable mouse input     -nograb      don't grab the mouse\n"
+"  -nodraw / -noblit headless/benchmark (skip rendering / skip blit)\n"
+"\n"
+"AI DIRECTOR / CO-OP BUDDY\n"
+"  -coop             rule-based co-op buddy (player 2; map needs Player_2_Start)\n"
+"  -aicoop           AI buddy: rule-based base + LLM director (opens TCP 31666)\n"
+"  -buddyreact <t>   buddy first-shot delay in tics (0=instant, ~14 ~= human)\n"
+"  -aidirector [port] LLM monster director; opens TCP listener (default 31666)\n"
+"  -aidemo           built-in test director (no Ollama)\n"
+"  -director         rule-based L4D-style spawn director (offline, no LLM)\n"
+"  -infight          monsters' projectiles hurt same-species (infighting on)\n"
+"  -nofriendlyfire   player and AI buddy can't damage each other (alias -noff)\n"
+"\n"
+"GAMEPLAY\n"
+"  -vanilla          purist 1993 mode: no free-look, no jump, infinitely-tall\n"
+"                    actors, auto-aim on, plain automap (disables the modern extras)\n"
+"  -infinitetall     vanilla infinitely-tall actors (no over/under 3D clipping)\n"
+"  -autoaim          restore vanilla vertical auto-aim (off by default)\n"
+"\n"
+"DEMOS\n"
+"  -record <lmp>     record a demo      -playdemo <lmp>  play a demo\n"
+"  -timedemo <lmp>   benchmark a demo   -maxdemo <n>     max demo size\n"
+"\n"
+"NETWORK (LAN)\n"
+"  -net / -server    host a game        -connect/-netclient <ip>  join a host\n"
+"  -port <n>         UDP port (default 5029)   -netplayers <n>  max players\n"
+"  -deathmatch / -altdeath   deathmatch modes   -timer <min>  frag time limit\n"
+"\n"
+"DEV / MISC\n"
+"  -deh <file>...    apply DeHackEd/BEX patches   -dehout [file|-]  log what they did\n"
+"  -devparm          developer mode (cheats, fps)   -debugfile  write debug.txt\n"
+"  -cdrom            CD-ROM save paths\n"
+"  -help / -h / -?   show this help and exit\n"
+"\n"
+"See BUDDYDOOM_PARAMETERS.md for the full reference, and run/README.md for the\n"
+"launchers (start_buddydoom.sh / start_aibuddy.sh) and the GUI launcher."
+    );
+}
+
+void D_DoomMain (void)
+{
+    int             p;
+    char                    file[256];
+
+    FindResponseFile ();
+
+    // -help / -h / -? / /?: print the flag reference and exit.
+    if (M_CheckParm ("-help") || M_CheckParm ("-h")
+	|| M_CheckParm ("-?") || M_CheckParm ("/?"))
+    {
+	D_PrintHelp ();
+	exit (0);
+    }
+
+    // Chocolate/Crispy multiplayer interop (clean-room reimpl; see i_udp.c/d_netcl.c).
+    // -querychoc <host[:port]>           query a server and exit
+    p = M_CheckParm ("-querychoc");
+    if (p && p < myargc-1) { I_QueryChocServer (myargv[p+1]); exit (0); }
+
+    // -chocsyn <host[:port]> [version]   SYN handshake test and exit
+    p = M_CheckParm ("-chocsyn");
+    if (p && p < myargc-1)
+    {
+	const char* ver = (p < myargc-2 && myargv[p+2][0] != '-') ? myargv[p+2] : "Chocolate Doom 3.1.1";
+	I_ConnectChocServer (myargv[p+1], ver, 2 /*commercial*/, 1 /*doom2*/);
+	exit (0);
+    }
+
+    // -netclient <host[:port]> [version] full connect/launch/gamestart self-test, exit
+    p = M_CheckParm ("-netclient");
+    if (p && p < myargc-1)
+    {
+	const char* ver = (p < myargc-2 && myargv[p+2][0] != '-') ? myargv[p+2] : "Chocolate Doom 3.1.1";
+	I_NetClientTest (myargv[p+1], ver, 2 /*commercial*/, 1 /*doom2*/);
+	exit (0);
+    }
+
+    IdentifyVersion ();
+	
+    setbuf (stdout, NULL);
+    modifiedgame = false;
+	
+    nomonsters = M_CheckParm ("-nomonsters");
+    respawnparm = M_CheckParm ("-respawn");
+    fastparm = M_CheckParm ("-fast");
+    // -infight: monster same-species infighting (was -friendlyfire).
+    { extern int infight; infight = M_CheckParm ("-infight") ? 1 : 0; }
+    // -infinitetall: revert to vanilla "infinitely tall actors" (no walking over/under things).
+    if (M_CheckParm ("-infinitetall")) over_under = 0;
+    // -autoaim: restore vanilla vertical aim-assist (off by default -> the human shoots where
+    // they look, so shots can be placed precisely / land headshots).
+    if (M_CheckParm ("-autoaim")) autoaim = 1;
+    // -vanilla: purist 1993 mode -- switch OFF every always-on modern deviation at once:
+    // no free-look and no jump (gated in g_game.c on vanilla_mode), vanilla infinitely-tall
+    // actors (no over/under 3D clipping), vanilla auto-aim ON, and the plain untextured
+    // automap.  It also turns off the now-DEFAULT AI systems: a plain no-flag launch runs
+    // the rule-based L4D spawn director + the AI co-op buddy (player 2); -vanilla (checked
+    // in P_Director_Init / P_AICoop_Init via vanilla_mode) gives you the bare 1993 game.
+    if (M_CheckParm ("-vanilla"))
+    {
+	vanilla_mode     = 1;
+	over_under       = 0;	// vanilla: actors are infinitely tall
+	autoaim          = 1;	// vanilla: vertical aim-assist on
+	automap_style    = AMS_VANILLA;	// vanilla: plain black-background line automap
+    }
+    // -nofriendlyfire (alias -noff): the player and the AI buddy can't damage each other.
+    { extern int ff_protect;
+      ff_protect = (M_CheckParm ("-nofriendlyfire") || M_CheckParm ("-noff")) ? 1 : 0; }
+    devparm = M_CheckParm ("-devparm");
+    if (M_CheckParm ("-altdeath"))
+	deathmatch = 2;
+    else if (M_CheckParm ("-deathmatch"))
+	deathmatch = 1;
+
+    switch ( gamemode )
+    {
+      case retail:
+	sprintf (title,
+		 "                         "
+		 "The Ultimate DOOM Startup v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+      case shareware:
+	sprintf (title,
+		 "                            "
+		 "DOOM Shareware Startup v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+      case registered:
+	sprintf (title,
+		 "                            "
+		 "DOOM Registered Startup v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+      case commercial:
+	sprintf (title,
+		 "                         "
+		 "DOOM 2: Hell on Earth v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+/*FIXME
+       case pack_plut:
+	sprintf (title,
+		 "                   "
+		 "DOOM 2: Plutonia Experiment v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+      case pack_tnt:
+	sprintf (title,
+		 "                     "
+		 "DOOM 2: TNT - Evilution v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+*/
+      default:
+	sprintf (title,
+		 "                     "
+		 "Public DOOM - v%i.%i"
+		 "                           ",
+		 VERSION_NUM/100,VERSION_NUM%100);
+	break;
+    }
+    
+    printf ("%s\n",title);
+
+    if (devparm)
+	printf(D_DEVSTR);
+    
+    // turbo option
+    if ( (p=M_CheckParm ("-turbo")) )
+    {
+	int     scale = 200;
+	extern int forwardmove[2];
+	extern int sidemove[2];
+	
+	if (p<myargc-1)
+	    scale = atoi (myargv[p+1]);
+	if (scale < 10)
+	    scale = 10;
+	if (scale > 400)
+	    scale = 400;
+	printf ("turbo scale: %i%%\n",scale);
+	forwardmove[0] = forwardmove[0]*scale/100;
+	forwardmove[1] = forwardmove[1]*scale/100;
+	sidemove[0] = sidemove[0]*scale/100;
+	sidemove[1] = sidemove[1]*scale/100;
+    }
+    
+    // add any files specified on the command line with -file wadfile
+    // to the wad list
+    //
+    // convenience hack to allow -wart e m to add a wad file
+    // prepend a tilde to the filename so wadfile will be reloadable
+    p = M_CheckParm ("-wart");
+    if (p)
+    {
+	myargv[p][4] = 'p';     // big hack, change to -warp
+
+	// Map name handling.
+	switch (gamemode )
+	{
+	  case shareware:
+	  case retail:
+	  case registered:
+	    sprintf (file,"~"DEVMAPS"E%cM%c.wad",
+		     myargv[p+1][0], myargv[p+2][0]);
+	    printf("Warping to Episode %s, Map %s.\n",
+		   myargv[p+1],myargv[p+2]);
+	    break;
+	    
+	  case commercial:
+	  default:
+	    p = atoi (myargv[p+1]);
+	    if (p<10)
+	      sprintf (file,"~"DEVMAPS"cdata/map0%i.wad", p);
+	    else
+	      sprintf (file,"~"DEVMAPS"cdata/map%i.wad", p);
+	    break;
+	}
+	D_AddFile (file);
+    }
+	
+    p = M_CheckParm ("-file");
+    if (p)
+    {
+	// the parms after p are wadfile/lump names,
+	// until end of parms or another - preceded parm
+	modifiedgame = true;            // homebrew levels
+	while (++p != myargc && myargv[p][0] != '-')
+	    D_AddFile (myargv[p]);
+    }
+
+    p = M_CheckParm ("-playdemo");
+
+    if (!p)
+	p = M_CheckParm ("-timedemo");
+
+    if (p && p < myargc-1)
+    {
+	sprintf (file,"%s.lmp", myargv[p+1]);
+	D_AddFile (file);
+	printf("Playing demo %s.lmp.\n",myargv[p+1]);
+    }
+    
+    // get skill / episode / map from parms
+    startskill = sk_medium;
+    startepisode = 1;
+    // (S) Strife's first level is map 2 (map01 is the town hub you come back to);
+    // strife-ve starts a new game with "map = 2".  -warp still overrides this below.
+    startmap = strife_mode ? 2 : 1;
+    autostart = false;
+
+		
+    p = M_CheckParm ("-skill");
+    if (p && p < myargc-1)
+    {
+	startskill = myargv[p+1][0]-'1';
+	autostart = true;
+    }
+
+    p = M_CheckParm ("-episode");
+    if (p && p < myargc-1)
+    {
+	startepisode = myargv[p+1][0]-'0';
+	startmap = 1;
+	autostart = true;
+    }
+	
+    p = M_CheckParm ("-timer");
+    if (p && p < myargc-1 && deathmatch)
+    {
+	int     time;
+	time = atoi(myargv[p+1]);
+	printf("Levels will end after %d minute",time);
+	if (time>1)
+	    printf("s");
+	printf(".\n");
+    }
+
+    p = M_CheckParm ("-avg");
+    if (p && p < myargc-1 && deathmatch)
+	printf("Austin Virtual Gaming: Levels will end after 20 minutes\n");
+
+    p = M_CheckParm ("-warp");
+    if (p && p < myargc-1)
+    {
+	if (gamemode == commercial)
+	    startmap = atoi (myargv[p+1]);
+	else
+	{
+	    startepisode = myargv[p+1][0]-'0';
+	    // "-warp E" (no map) is allowed -> default to map 1.  Reading
+	    // myargv[p+2] unconditionally walked off the end of argv (crash).
+	    startmap = (p < myargc-2 && myargv[p+2][0] != '-') ? myargv[p+2][0]-'0' : 1;
+	}
+	autostart = true;
+    }
+    
+    // init subsystems
+    printf ("V_Init: allocate screens.\n");
+    V_Init ();
+
+    printf ("M_LoadDefaults: Load system defaults.\n");
+    M_LoadDefaults ();              // load before initing other systems
+
+    // NOTE: monster_backing / monster_dodge are deliberately NOT command-line
+    // switches.  They are config-backed, and the config is written out on exit --
+    // so a parm that set one would silently persist it, and a single test run with
+    // the flag would leave the option on forever.  Toggle them in
+    // Options -> Features, or set monster_backing / monster_dodge in the config.
+
+    printf ("Z_Init: Init zone memory allocation daemon. \n");
+    Z_Init ();
+
+    // Add buddydoom.wad EARLY -- before W_Init/R_InitSprites -- so any sprites baked into it
+    // (e.g. the deployable turret's MTUR* frames) are picked up by the sprite frame table.
+    // The voice code (I_Voice_Init) then sees it's already loaded and skips re-adding it.
+    // (Previously buddydoom.wad was added late, for voice/HUD only, so its actor sprites never
+    // registered; the turret art shipped in a separate early turret.wad.)
+    {
+	char aw[256], id0[300];
+	I_Voice_ResolveWad (aw, sizeof(aw));
+	snprintf (id0, sizeof(id0), "ID0/%s", aw);
+	if (aw[0] && (!access (aw, R_OK) || !access (id0, R_OK)))
+	{
+	    D_AddFile (aw);
+	    printf ("BuddyDoom asset WAD: %s -> loaded early (sprites register with the sprite system)\n", aw);
+	}
+    }
+
+    // ID24 resource WAD (id24res.wad): Legacy-of-Rust sprites/sounds + the SBARDEF
+    // status-bar and its graphics.  Auto-overlaid EARLY (before R_InitSprites) when
+    // present, so the new content's art registers with the sprite/sound systems.
+    if (!access ("ID0/id24res.wad", R_OK) || !access ("id24res.wad", R_OK))
+    {
+	D_AddFile ("id24res.wad");
+	printf ("ID24 resources: id24res.wad -> loaded early (LoR sprites/sounds + SBARDEF)\n");
+    }
+
+    // Auto-load any buddy WAD (a *.wad in ID0/ with a BUDDYDEF lump) so it shows up
+    // in the Buddy menu without an explicit -file.  Must run BEFORE W_InitMultipleFiles
+    // (its lumps need to be in the directory for P_Buddy_LoadDefs + R_InitSprites).
+    D_AutoloadBuddyWads ();
+
+    printf ("W_Init: Init WADfiles.\n");
+    W_InitMultipleFiles (wadfiles);
+    {   // Fill BuddyDoom's *appended* builtin mobjtypes (Heretic/Hexen/Freedoom/RevMarine/
+	// Morph/HereticInv) BEFORE applying the DEHACKED.  A DSDHacked patch (e.g. Legacy
+	// of Rust's id1.wad) numbers its new things from the vanilla+MBF boundary (~Thing
+	// 151), which lands directly on these appended builtin slots.  Running the installers
+	// first lets the DEH's Thing edits OVERWRITE them (the DEH wins) -- otherwise these
+	// ran after the DEH and clobbered the DEH-defined LoR monsters/decorations, so they
+	// spawned as "unknown type" (no Ghouls, missing scenery).  These installers only
+	// populate static tables, so they're safe this early (before R_Init/P_Init).
+	extern void Heretic_Init(void), Hexen_Init(void), Freedoom_Init(void),
+		    RevMarine_Init(void), Morph_Init(void), HereticInv_Init(void),
+		    Heretic_Items_Init(void), Heretic_Deco_Init(void), Heretic_MVar_Init(void),
+		    Heretic_Weapons_Init(void);
+	extern void Hexen_Deco_Init(void), Hexen_Items_Init(void), Hexen_Mon_Init(void);
+    extern void Hexen_Things_Init(void);	// (X) Thing_* specials + glass shards
+	extern void Sounds_Heretic_Init(void), Sounds_Hexen_Init(void), Sounds_HWeapons_Init(void);
+	extern void Sounds_Strife_Init(void);
+	extern void Strife_Init(void), Strife_Deco_Init(void), Strife_Mon_Init(void), Strife_Weapons_Init(void), Strife_Items_Init(void);
+	{ extern void Heretic_Splash_Init(void); Heretic_Splash_Init (); }	// (H) liquid-terrain splash actors
+	Heretic_Init (); Heretic_Deco_Init (); Heretic_MVar_Init ();	// (H) monsters + scenery + variants
+	Hexen_Init (); Hexen_Deco_Init (); Hexen_Items_Init (); Hexen_Mon_Init ();	// (X) full Hexen pack
+    Hexen_Things_Init ();						// (X) stained-glass shards
+	Strife_Init (); Strife_Deco_Init (); Strife_Mon_Init ();		// (S) Strife core + scenery + monsters
+	Strife_Weapons_Init ();						// (S) player weapons (overwrites weaponinfo in strife_mode)
+	Strife_Items_Init ();						// (S) pickups (ammo/weapons/armor/keys/inventory)
+	Freedoom_Init ();
+	RevMarine_Init (); Morph_Init (); HereticInv_Init ();
+	Heretic_Items_Init ();		// (H) map-placeable Heretic keys/ammo/weapons/shields/vial
+	Heretic_Weapons_Init ();	// (H) player weapons -- Phase 1: Staff + Gold Wand (heretic_mode only)
+	// (X) The Hexen wave-2 pack is summon-only (no hexen_mode map path yet): force every
+	// Hexen additive type's doomednum to -1 so real Hexen ednums can't shadow DOOM/Heretic
+	// map things.  MT_XZARMORCHUNK is the first of that block.
+	//
+	// (S) It used to run all the way to NUMMOBJTYPES -- which also wiped every STRIFE
+	// type, because the Strife block sits after Hexen's in the enum.  Strife_*_Init had
+	// just filled those doomednums and this erased them again, so P_StrifeThingType
+	// resolved almost nothing and a Strife map came up nearly empty (map02: 377 of 602
+	// things dropped as "unknown type").  Strife DOES have a map path, so keep its
+	// numbers in strife_mode -- and only there, or a Strife ednum would shadow a
+	// DOOM/Heretic one (3002 is both a Strife thing and the Hell Knight).
+	{ extern mobjinfo_t* mobjinfo; int i;
+	  // ... but NOT in hexen mode: there the map things ARE Hexen's, and
+	  // P_SetupLevel calls Hexen_SetMapEdnums to restore the real numbers.
+	  if (gametype != GT_HEXEN)
+	      for (i = MT_XZARMORCHUNK; i < MT_S_FIELDGUARD; i++) mobjinfo[i].doomednum = -1;
+	  if (!strife_mode)
+	      for (i = MT_S_FIELDGUARD; i < NUMMOBJTYPES; i++) mobjinfo[i].doomednum = -1; }
+	// Per-game SFX tables (files/sounds_heretic.c, files/sounds_hexen.c): fill the
+	// sfx_h_*/sfx_x_* slots with native lump names before I_InitSound precaches.
+	Sounds_Heretic_Init (); Sounds_Hexen_Init (); Sounds_HWeapons_Init ();	// (H) +weapon sfx
+	Sounds_Strife_Init ();							// (S) Strife sfx table
+    }
+    {   // DeHackEd/BEX/MBF21: apply every DEHACKED lump + -deh files before the tables are read
+        extern void D_ProcessDehInWads (void);
+        printf ("DEH: Applying DeHackEd/BEX/MBF21 patches.\n");
+        D_ProcessDehInWads ();
+    }
+    {   // BUDDYDEF: native modder co-op buddies -- read straight from the WADs (no decohack).
+        // After DEH (can reference DSDHacked things) but BEFORE R_Init (so R_InitSprites
+        // picks up each buddy's sprite name).  See files/p_buddydef.c.
+        extern void P_Buddy_LoadDefs (void);
+        P_Buddy_LoadDefs ();
+    }
+    {   // UMAPINFO: per-map level name / progression / music / sky / bossaction
+        extern void U_LoadMapInfo (void);
+        U_LoadMapInfo ();
+    }
+    D_LoadDemoLoop ();		// ID24 DEMOLOOP: custom title/demo sequence
+    D_LoadGameConf ();		// ID24 GAMECONF: WAD manifest (applies game mode)
+    {   // ID24 Legacy-of-Rust content: install the new sprites/sounds/states/things
+	// from the generated tables BEFORE R_Init (so R_InitSprites sees the sprites).
+	extern void ID24_Init (void);
+	ID24_Init ();
+    }
+printf("added\n");
+    
+
+    // Check for -file in shareware
+    if (modifiedgame)
+    {
+	// These are the lumps that will be checked in IWAD,
+	// if any one is not present, execution will be aborted.
+	char name[23][8]=
+	{
+	    "e2m1","e2m2","e2m3","e2m4","e2m5","e2m6","e2m7","e2m8","e2m9",
+	    "e3m1","e3m3","e3m3","e3m4","e3m5","e3m6","e3m7","e3m8","e3m9",
+	    "dphoof","bfgga0","heada1","cybra1","spida1d1"
+	};
+	int i;
+	
+	if ( gamemode == shareware)
+	    I_Error("\nYou cannot -file with the shareware "
+		    "version. Register!");
+
+	// Check for fake IWAD with right name,
+	// but w/o all the lumps of the registered version. 
+	if (gamemode == registered)
+	    for (i = 0;i < 23; i++)
+		if (W_CheckNumForName(name[i])<0)
+		    I_Error("\nThis is not the registered version.");
+    }
+    
+    // Iff additonal PWAD files are used, print modified banner
+    if (modifiedgame)
+    {
+	/*m*/printf (
+	    "===========================================================================\n"
+	    "ATTENTION:  This version of DOOM has been modified.  If you would like to\n"
+	    "get a copy of the original game, call 1-800-IDGAMES or see the readme file.\n"
+	    "        You will not receive technical support for modified games.\n"
+	    "===========================================================================\n"
+	    );
+	// NOTE: the original here blocked on getchar() ("press enter to continue").
+	// The launcher now starts the game windowless (no console), so a blocking read
+	// would hang startup invisibly the moment any PWAD is loaded -- dropped.
+    }
+	
+
+    // Check and print which version is executed.
+    switch ( gamemode )
+    {
+      case shareware:
+      case indetermined:
+	printf (
+	    "===========================================================================\n"
+	    "                                Shareware!\n"
+	    "===========================================================================\n"
+	);
+	break;
+      case registered:
+      case retail:
+      case commercial:
+	printf (
+	    "===========================================================================\n"
+	    "                 Commercial product - do not distribute!\n"
+	    "         Please report software piracy to the SPA: 1-800-388-PIR8\n"
+	    "===========================================================================\n"
+	);
+	break;
+	
+      default:
+	// Ouch.
+	break;
+    }
+
+    printf ("M_Init: Init miscellaneous info.\n");
+    M_Init ();
+
+    Heretic_RemapNativeSprites ();	// heretic_mode: point H* sprites at heretic.wad's native codes
+					//   (must run BEFORE R_Init builds sprites[] from sprnames[])
+    { extern void Strife_RemapNativeSprites(void); Strife_RemapNativeSprites (); }
+    Hexen_RemapNativeSprites ();	// hexen_mode: SPR_X* -> hexen.wad native codes	// strife_mode: S* -> native
+    printf ("R_Init: Init DOOM refresh daemon - ");
+    R_Init ();
+    { extern void P_InitTerrainTypes(void); P_InitTerrainTypes (); }	// (H) floorpic->liquid table (needs flats from R_Init)
+    {   // ID24 SKYDEFS: parse the sky-definition lump (needs the texture table from R_Init)
+	extern void R_LoadSkyDefs (void);
+	R_LoadSkyDefs ();
+    }
+
+    printf ("\nP_Init: Init Playloop state.\n");
+    P_Init ();
+    { extern void P_AICoop_InitRaiseState (void);
+      P_AICoop_InitRaiseState (); }	// buddy revive animation: grows states[], so it has
+					// to happen before any mobj holds a state_t*
+    { extern void P_Buddy_ResolveFrames (void);
+      P_Buddy_ResolveFrames (); }	// BUDDYDEF basemonster -> frame map.  AFTER P_Init:
+					// that is where R_InitSprites builds sprites[],
+					// which the per-game name resolvers read.
+
+
+    printf ("I_Init: Setting up machine state.\n");
+    I_Init ();
+
+    // -connect <host[:port]> [version] -- join a Chocolate/Crispy server as a
+    // client; flags D_CheckNetGame onto the choc path (d_net.c / d_netcl.c).
+    p = M_CheckParm ("-connect");
+    if (p && p < myargc-1)
+    {
+	extern boolean	choc_client;
+	extern char	choc_host[];
+	extern char	choc_version[];
+	choc_client = true;
+	strncpy (choc_host, myargv[p+1], 255);  choc_host[255] = 0;
+	if (p < myargc-2 && myargv[p+2][0] != '-')
+	{ strncpy (choc_version, myargv[p+2], 127);  choc_version[127] = 0; }
+    }
+
+    printf ("D_CheckNetGame: Checking network game status.\n");
+    D_CheckNetGame ();
+
+    // -coop or -aicoop: enable the co-op companion (player 2).  -coop is the
+    // autonomous rule-based bot; -aicoop adds the LLM director layer (the
+    // director sets the buddy's tactics over the same TCP transport as the
+    // monsters -- see p_ai_coop.c / p_ai_llm.c).  The two flags are mutually
+    // exclusive -- specifying both aborts in P_AICoop_Init.  Must run after
+    // D_CheckNetGame (which sets playeringame[]) and before the first level.
+    P_AICoop_Init ();
+    P_Director_Init ();		// L4D-style rule-based spawn director (-director)
+    G_AgentInit ();		// full agent/LLM control of the player (-aiplayer)
+
+    printf ("S_Init: Setting up sound.\n");
+    S_Init (snd_SfxVolume /* *8 */, snd_MusicVolume /* *8*/ );
+
+    printf ("HU_Init: Setting up heads up display.\n");
+    HU_Init ();
+
+    C_Init ();		// developer console (toggle with `)
+
+    printf ("HU_Buddy_Init: Companion HUD.\n");
+    HU_Buddy_Init ();	// small top-strip HUD for the co-op buddy
+
+    printf ("ST_Init: Init status bar.\n");
+    ST_Init ();
+
+    // check for a driver that wants intermission stats
+    p = M_CheckParm ("-statcopy");
+    if (p && p<myargc-1)
+    {
+	// for statistics driver
+	extern  void*	statcopy;                            
+
+	statcopy = (void*)atoi(myargv[p+1]);
+	printf ("External statistics registered.\n");
+    }
+    
+    // start the apropriate game based on parms
+    p = M_CheckParm ("-record");
+
+    if (p && p < myargc-1)
+    {
+	G_RecordDemo (myargv[p+1]);
+	autostart = true;
+    }
+	
+    p = M_CheckParm ("-playdemo");
+    if (p && p < myargc-1)
+    {
+	singledemo = true;              // quit after one demo
+	G_DeferedPlayDemo (myargv[p+1]);
+	D_DoomLoop ();  // never returns
+    }
+	
+    p = M_CheckParm ("-timedemo");
+    if (p && p < myargc-1)
+    {
+	G_TimeDemo (myargv[p+1]);
+	D_DoomLoop ();  // never returns
+    }
+	
+    p = M_CheckParm ("-shotat");
+    if (p && p < myargc-1)
+    {
+	shotattic = atoi (myargv[p+1]);
+	// One tic per frame: without it the tic we stop on depends on how fast the
+	// machine renders, which is the non-determinism this is here to remove.
+	singletics = true;
+    }
+
+    p = M_CheckParm ("-loadgame");
+    if (p && p < myargc-1)
+    {
+	sprintf(file, SAVEGAMENAME"%c.dsg",myargv[p+1][0]);	// always ID0/ -- no c:\doomdata
+	G_LoadGame (file);
+    }
+	
+
+    if ( gameaction != ga_loadgame )
+    {
+	if (autostart || netgame)
+	    G_InitNew (startskill, startepisode, startmap);
+	else
+	    D_StartTitle ();                // start up intro loop
+
+    }
+
+    D_DoomLoop ();  // never returns
+}

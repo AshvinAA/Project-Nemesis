@@ -1,0 +1,1058 @@
+// Emacs style mode select   -*- C -*-
+//-----------------------------------------------------------------------------
+//
+// DESCRIPTION:
+//	Additive Heretic monsters in the DOOM engine (HERETIC_HEXEN.md approach A).
+//	Ported from crispy-doom's heretic/info.c (frame tables) + heretic/p_enemy.c
+//	(action funcs).  The states/mobjinfo are appended to the engine tables at
+//	runtime (Heretic_Init) so info.c's huge generated initializers stay untouched;
+//	the enum slots live at the end of statenum_t/mobjtype_t/spritenum_t (info.h).
+//	Sprites + AUTHENTIC SOUNDS: hereticstuff.wad (renamed H* sprites; Heretic SFX copied
+//	with a DS prefix -> sfx_h_* in sounds.c, so monsters sound like Heretic, not DOOM).
+//
+//	Monsters (all 10): Mummy, Sabreclaw, Gargoyle, Knight (melee); Weredragon, Disciple,
+//	Ophidian (ranged); Maulotaur, Iron Lich, D'Sparil (bosses).  Weapons/Hexen still TODO.
+//
+//-----------------------------------------------------------------------------
+
+#include <string.h>
+
+#include "doomdef.h"
+#include "info.h"
+#include "m_random.h"
+#include "m_fixed.h"
+#include "tables.h"		// finecosine/finesine, ANGLETOFINESHIFT (imp charge)
+#include "sounds.h"
+#include "w_wad.h"
+#include "p_mobj.h"
+#include "r_state.h"		// sprites[]/numsprites -- parsed-sprite presence test
+#include "heretic.h"
+
+#define ONFLOORZ	MININT		// from p_local.h (avoided: its p_spec.h open/close enums)
+
+extern state_t *states;
+extern mobjinfo_t *mobjinfo;
+
+// engine helpers (no public header for the p_enemy action funcs -- declare by hand)
+extern void	A_Look (mobj_t*);
+extern void	A_Chase (mobj_t*);
+extern void	A_FaceTarget (mobj_t*);
+extern void	A_Pain (mobj_t*);
+extern void	A_Scream (mobj_t*);
+extern void	A_Fall (mobj_t*);
+extern void	A_BossDeath (mobj_t*);	// episode-boss death -> tag-666 floor (p_enemy.c, heretic branch)
+extern boolean	P_CheckMeleeRange (mobj_t*);
+extern void	P_DamageMobj (mobj_t* target, mobj_t* inflictor, mobj_t* source, int damage);
+extern void	S_StartSound (void* origin, int sfx_id);
+extern mobj_t*	P_SpawnMobj (fixed_t x, fixed_t y, fixed_t z, mobjtype_t type);
+extern boolean	P_SetMobjState (mobj_t* mobj, statenum_t state);
+extern fixed_t	P_AproxDistance (fixed_t dx, fixed_t dy);
+extern mobj_t*	P_SpawnMonsterChecked (fixed_t x, fixed_t y, mobjtype_t type);
+extern mobj_t*	P_SpawnMissile (mobj_t* source, mobj_t* dest, mobjtype_t type);
+extern void	A_Tracer (mobj_t*);		// revenant homing -- reused for the lich whirlwind
+extern void	A_Explode (mobj_t*);		// rocket-style radius blast -- d'sparil bolt impact
+
+// ---------------------------------------------------------------------------
+// Action functions (crispy heretic/p_enemy.c, adapted to DOOM's 1-arg signature).
+// Heretic's HITDICE(d) melee damage = ((P_Random() & 7) + 1) * d.
+// ---------------------------------------------------------------------------
+void A_MummyAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	P_DamageMobj (actor->target, actor, actor, ((P_Random () & 7) + 1) * 2);
+}
+
+// Sabreclaw (clink): melee, (P_Random()%7)+3 = 3..9.
+void A_ClinkAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	P_DamageMobj (actor->target, actor, actor, (P_Random () % 7) + 3);
+}
+
+// Gargoyle (imp): melee, 5 + (P_Random()&7) = 5..12.
+void A_ImpMeAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	P_DamageMobj (actor->target, actor, actor, 5 + (P_Random () & 7));
+}
+
+// Gargoyle dive-bomb: ~25 % of the time launch a skull-fly charge at the target (DOOM's
+// MF_SKULLFLY handling damages on contact and reverts to spawnstate on impact); else
+// just keep flying.
+void A_ImpMsAttack (mobj_t* actor)
+{
+    mobj_t*	dest;
+    angle_t	an;
+    int		dist;
+
+    if (!actor->target || P_Random () > 64)
+    {
+	P_SetMobjState (actor, actor->info->seestate);
+	return;
+    }
+    dest = actor->target;
+    actor->flags |= MF_SKULLFLY;
+    S_StartSound (actor, actor->info->attacksound);
+    A_FaceTarget (actor);
+    an = actor->angle >> ANGLETOFINESHIFT;
+    actor->momx = FixedMul (12*FRACUNIT, finecosine[an]);
+    actor->momy = FixedMul (12*FRACUNIT, finesine[an]);
+    dist = P_AproxDistance (dest->x - actor->x, dest->y - actor->y) / (12*FRACUNIT);
+    if (dist < 1) dist = 1;
+    actor->momz = (dest->z + (dest->height>>1) - actor->z) / dist;
+}
+
+// Gargoyle death: drop the float so the corpse falls, and stop blocking.
+void A_ImpDeath (mobj_t* actor)
+{
+    actor->flags &= ~(MF_SOLID | MF_FLOAT | MF_NOGRAVITY);
+}
+
+// Undead warrior (knight): melee HITDICE(3) = 3..24, else hurl a spinning axe.
+void A_KnightAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    if (P_CheckMeleeRange (actor))
+    {
+	P_DamageMobj (actor->target, actor, actor, ((P_Random () & 7) + 1) * 3);
+	return;
+    }
+    S_StartSound (actor, actor->info->attacksound);
+    P_SpawnMissile (actor, actor->target, MT_HKNIGHTAXE);	// throw the axe
+}
+
+// Looping whoosh while the thrown axe spins through the air.
+void A_ContMobjSound (mobj_t* actor)
+{
+    S_StartSound (actor, sfx_firsht);
+}
+
+#define HITDICE(d)	(((P_Random () & 7) + 1) * (d))
+
+// Weredragon (beast): melee HITDICE(3), else hurl a fireball.
+void A_BeastAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	{ P_DamageMobj (actor->target, actor, actor, HITDICE (3)); return; }
+    P_SpawnMissile (actor, actor->target, MT_HBEASTBALL);
+}
+
+// Disciple (wizard): melee HITDICE(4), else fire a homing-coloured bolt.
+void A_WizardAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	{ P_DamageMobj (actor->target, actor, actor, HITDICE (4)); return; }
+    P_SpawnMissile (actor, actor->target, MT_HWIZFX);
+}
+
+// Ophidian (snake): pure ranged -- spit a projectile.
+void A_SnakeAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    P_SpawnMissile (actor, actor->target, MT_HSNAKEPRO);
+}
+
+// ---- Maulotaur (minotaur miniboss): swing + slam-charge + mace ball --------
+#define MNTR_CHARGE_SPEED (13*FRACUNIT)
+
+void A_MinotaurAtk1 (mobj_t* actor)			// melee hammer swing
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	P_DamageMobj (actor->target, actor, actor, HITDICE (4));
+}
+
+extern angle_t	R_PointToAngle2 (fixed_t x1, fixed_t y1, fixed_t x2, fixed_t y2);
+
+// (H) Maulotaur slam (crispy P_MinotaurSlam): a hard directional shove + HITDICE(6),
+// and a brief stun (reactiontime) if it caught the player.  Called from the Maulotaur
+// branch of the skull-fly path in PIT_CheckThing (p_map.c).
+void P_MinotaurSlam (mobj_t* source, mobj_t* target)
+{
+    angle_t	angle = R_PointToAngle2 (source->x, source->y, target->x, target->y) >> ANGLETOFINESHIFT;
+    fixed_t	thrust = 16*FRACUNIT + (P_Random() << 10);
+    target->momx += FixedMul (thrust, finecosine[angle]);
+    target->momy += FixedMul (thrust, finesine[angle]);
+    P_DamageMobj (target, NULL, NULL, HITDICE (6));
+    if (target->player)
+	target->reactiontime = 14 + (P_Random() & 7);		// knocked off balance
+}
+
+// Mid-range: maybe SLAM-CHARGE the target.  Set MF_SKULLFLY + charge momentum + a charge
+// TIMER (reactiontime; this engine's mobj_t has no Heretic special1), then run the
+// A_MinotaurCharge loop.  The slam itself (P_MinotaurSlam) fires from the p_map.c hook.
+void A_MinotaurDecide (mobj_t* actor)
+{
+    mobj_t*	t = actor->target;
+    angle_t	an;
+    fixed_t	dist;
+    if (!t)
+	return;
+    dist = P_AproxDistance (actor->x - t->x, actor->y - t->y);
+    if (dist > 64*FRACUNIT && dist < 8*64*FRACUNIT && P_Random () < 150)
+    {
+	S_StartSound (actor, actor->info->seesound);
+	A_FaceTarget (actor);
+	actor->flags |= MF_SKULLFLY;
+	an = actor->angle >> ANGLETOFINESHIFT;
+	actor->momx = FixedMul (MNTR_CHARGE_SPEED, finecosine[an]);
+	actor->momy = FixedMul (MNTR_CHARGE_SPEED, finesine[an]);
+	actor->reactiontime = 35 / 2;			// charge duration (crispy special1)
+	P_SetMobjState (actor, S_HMIN_ATK4_1);
+    }
+}
+
+// Charge loop (crispy A_MinotaurCharge): trail dust each tic; when the timer runs out,
+// drop out of the skull-fly charge and resume chasing.  (A wall/target hit also ends it
+// via the p_map.c skull-fly path.)
+void A_MinotaurCharge (mobj_t* actor)
+{
+    if (actor->reactiontime > 0)
+    {
+	mobj_t*	puff = P_SpawnMobj (actor->x, actor->y, actor->z, MT_HWP_PHNXPUFF);
+	if (puff)
+	    puff->momz = 2*FRACUNIT;
+	actor->reactiontime--;
+    }
+    else
+    {
+	actor->flags &= ~MF_SKULLFLY;
+	P_SetMobjState (actor, actor->info->seestate);
+    }
+}
+
+void A_MinotaurAtk2 (mobj_t* actor)			// melee, else hurl a mace ball
+{
+    if (!actor->target || (actor->flags & MF_SKULLFLY))	// (mid-charge -> no throw)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	{ P_DamageMobj (actor->target, actor, actor, HITDICE (5)); return; }
+    P_SpawnMissile (actor, actor->target, MT_HMINOTAURFX);
+}
+
+// (H) Whirlwind flight thinker (crispy A_WhirlwindSeek): the whirlwind lives on a
+// countdown stored in `health` (this engine's mobj_t has no special2), fading to its
+// death state when it expires; meanwhile it homes toward its tracer via the engine's
+// A_Tracer and whirs periodically.  Wired into the S_HIRX* flight loop below.
+extern int	leveltime;
+
+void A_WhirlwindSeek (mobj_t* actor)
+{
+    actor->health -= 3;				// lifetime countdown (~9s from spawnhealth)
+    if (actor->health < 0)
+    {
+	actor->momx = actor->momy = actor->momz = 0;
+	P_SetMobjState (actor, mobjinfo[actor->type].deathstate);
+	actor->flags &= ~MF_MISSILE;		// stop being a missile -> fades in place
+	return;
+    }
+    if (!(leveltime & 31))
+	S_StartSound (actor, sfx_h_hedat3);	// periodic whir
+    A_Tracer (actor);				// homing seek toward tracer
+}
+
+// (H) The whirlwind engulfs whatever it overlaps (crispy P_TouchWhirlwind): it buffets
+// the victim (spin + shove + updraft) and does 3 damage every 8 tics, WITHOUT exploding
+// -- so it lingers.  Called from the MT_HWHIRLWIND branch of PIT_CheckThing (p_map.c).
+void P_TouchWhirlwind (mobj_t* target)
+{
+    int	r;
+    target->angle += (P_Random() - P_Random()) << 20;
+    target->momx  += (P_Random() - P_Random()) << 10;
+    target->momy  += (P_Random() - P_Random()) << 10;
+    if (leveltime & 16)
+    {
+	r = P_Random();
+	if (r > 160) r = 160;
+	target->momz += r << 10;
+	if (target->momz > 12*FRACUNIT) target->momz = 12*FRACUNIT;
+    }
+    if (!(leveltime & 7))
+	P_DamageMobj (target, NULL, NULL, 3);
+}
+
+// Iron lich: melee HITDICE(6), else lob an ice ball or release a HOMING whirlwind.  The
+// whirlwind's tracer is set to the target so A_WhirlwindSeek (above) steers + times it
+// out -- the lich's signature seeking attack.  (The fire-column third attack is omitted.)
+void A_LichAttack (mobj_t* actor)
+{
+    mobj_t*	t = actor->target;
+    if (!t)
+	return;
+    A_FaceTarget (actor);
+    if (P_CheckMeleeRange (actor))
+	{ P_DamageMobj (t, actor, actor, HITDICE (6)); return; }
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_Random () < 160)
+	P_SpawnMissile (actor, t, MT_HHEADFX1);			// ice ball
+    else
+    {
+	mobj_t* wh = P_SpawnMissile (actor, t, MT_HWHIRLWIND);	// homing whirlwind
+	if (wh) { wh->tracer = t; wh->z += 32*FRACUNIT; }
+    }
+}
+
+// D'Sparil (phase-2 sorcerer): brutal melee, else fire an exploding blue bolt.  (The serpent
+// phase, the teleport, and the wizard-summon attack are omitted -- this is the standing
+// final-boss caster.)
+void A_DsparilAttack (mobj_t* actor)
+{
+    if (!actor->target)
+	return;
+    S_StartSound (actor, actor->info->attacksound);
+    if (P_CheckMeleeRange (actor))
+	{ P_DamageMobj (actor->target, actor, actor, HITDICE (8)); return; }
+    P_SpawnMissile (actor, actor->target, MT_HDSPARILFX);
+}
+
+// ---------------------------------------------------------------------------
+// Table fill
+// ---------------------------------------------------------------------------
+static void ST (statenum_t s, spritenum_t spr, int frame, int tics,
+		actionf_p1 act, statenum_t next)
+{
+    states[s].sprite      = spr;
+    states[s].frame       = frame;
+    states[s].tics        = tics;
+    states[s].action.acp1 = act;
+    states[s].nextstate   = next;
+    states[s].misc1 = states[s].misc2 = 0;
+}
+
+// (heretic_mode) Point our palette-converted "H*" Heretic sprite codes at heretic.wad's
+// NATIVE 4-char sprite codes, so the monsters render from the real Heretic art (correct
+// colours) straight out of heretic.wad -- no hereticstuff.wad overlay needed.  MUST be
+// called BEFORE R_Init (which builds sprites[] from sprnames[]).  DOOM (heretic_mode==0)
+// is untouched.  The artifact sprites (PTN1/SPHL/...) are already native-named -> no remap.
+void Heretic_RemapNativeSprites (void)
+{
+    extern int    heretic_mode;
+    extern char** sprnames;
+    static const char* map[][2] = {
+	{"HIMP","IMPX"},{"HMUM","MUMM"},{"HMUF","FX15"},{"HKNI","KNIG"},{"HKAX","SPAX"},
+	{"HKRX","RAXE"},{"HBEA","BEAS"},{"HBEB","FRB1"},{"HCLK","CLNK"},{"HWIZ","WZRD"},
+	{"HWIB","FX11"},{"HSNK","SNKE"},{"HSNB","SNFX"},{"HIRO","HEAD"},{"HIRB","FX05"},
+	{"HIRW","FX06"},{"HIRX","FX07"},{"HMIN","MNTR"},{"HMNA","FX12"},{"HMNB","FX13"},
+	{"HMNC","FX14"},{"HSR1","SRCR"},{"HSR2","SOR2"},{"HSRB","FX16"},{"HCHK","CHKN"},
+	// (H) decoration / scenery (files/heretic_deco.c)
+	{"HPOD","PPOD"},{"HAMG","AMG1"},{"HSK1","SKH1"},{"HSK2","SKH2"},{"HSK3","SKH3"},
+	{"HSK4","SKH4"},{"HCHD","CHDL"},{"HSRT","SRTC"},{"HSMP","SMPL"},{"HSGS","STGS"},
+	{"HSGL","STGL"},{"HSCS","STCS"},{"HSCL","STCL"},{"HKFR","KFR1"},{"HBAR","BARL"},
+	{"HBRP","BRPL"},{"HMS1","MOS1"},{"HMS2","MOS2"},{"HWTR","WTRH"},{"HHCO","HCOR"},
+	{"HKG1","KGZ1"},{"HKGB","KGZB"},{"HKGG","KGZG"},{"HKGY","KGZY"},{"HVLC","VLCO"},
+	{"HVFB","VFBL"},{"HVTF","VTFB"},{"HXPL","XPL1"},{"HSFF","SFFI"},{"HTGL","TGLT"},
+	{"HTLE","TELE"},
+	// (H) monster variants (files/heretic_mvar.c) -- HMUF/HKRX/HSR1 already above
+	{"HIMB","FX10"},{"HS1B","FX14"},
+    };
+    int s, k, n = (int)(sizeof(map)/sizeof(map[0]));
+    if (!heretic_mode)
+	return;
+    for (s = 0; s < NUMSPRITES; s++)
+	if (sprnames[s])
+	    for (k = 0; k < n; k++)
+		if (!strncmp (sprnames[s], map[k][0], 4))
+		{ sprnames[s] = (char*)map[k][1]; break; }
+}
+
+void Heretic_Init (void)
+{
+    mobjinfo_t*	m;
+
+    // ---- Mummy states (crispy S_MUMMY_*; soul-on-death omitted for now) ----
+    ST (S_HMUM_LOOK1, SPR_HMUM,  0, 10, (actionf_p1)A_Look,        S_HMUM_LOOK2);
+    ST (S_HMUM_LOOK2, SPR_HMUM,  1, 10, (actionf_p1)A_Look,        S_HMUM_LOOK1);
+    ST (S_HMUM_WALK1, SPR_HMUM,  0,  4, (actionf_p1)A_Chase,       S_HMUM_WALK2);
+    ST (S_HMUM_WALK2, SPR_HMUM,  1,  4, (actionf_p1)A_Chase,       S_HMUM_WALK3);
+    ST (S_HMUM_WALK3, SPR_HMUM,  2,  4, (actionf_p1)A_Chase,       S_HMUM_WALK4);
+    ST (S_HMUM_WALK4, SPR_HMUM,  3,  4, (actionf_p1)A_Chase,       S_HMUM_WALK1);
+    ST (S_HMUM_ATK1,  SPR_HMUM,  4,  6, (actionf_p1)A_FaceTarget,  S_HMUM_ATK2);
+    ST (S_HMUM_ATK2,  SPR_HMUM,  5,  6, (actionf_p1)A_MummyAttack, S_HMUM_ATK3);
+    ST (S_HMUM_ATK3,  SPR_HMUM,  6,  6, (actionf_p1)A_FaceTarget,  S_HMUM_WALK1);
+    ST (S_HMUM_PAIN1, SPR_HMUM,  7,  4, NULL,                      S_HMUM_PAIN2);
+    ST (S_HMUM_PAIN2, SPR_HMUM,  7,  4, (actionf_p1)A_Pain,        S_HMUM_WALK1);
+    ST (S_HMUM_DIE1,  SPR_HMUM,  8,  5, NULL,                      S_HMUM_DIE2);
+    ST (S_HMUM_DIE2,  SPR_HMUM,  9,  5, (actionf_p1)A_Scream,      S_HMUM_DIE3);
+    ST (S_HMUM_DIE3,  SPR_HMUM, 10,  5, NULL,                      S_HMUM_DIE4);
+    ST (S_HMUM_DIE4,  SPR_HMUM, 11,  5, NULL,                      S_HMUM_DIE5);
+    ST (S_HMUM_DIE5,  SPR_HMUM, 12,  5, (actionf_p1)A_Fall,        S_HMUM_DIE6);
+    ST (S_HMUM_DIE6,  SPR_HMUM, 13,  5, NULL,                      S_HMUM_DIE7);
+    ST (S_HMUM_DIE7,  SPR_HMUM, 14,  5, NULL,                      S_HMUM_DIE8);
+    ST (S_HMUM_DIE8,  SPR_HMUM, 15, -1, NULL,                      S_NULL);
+
+    // ---- Mummy mobjinfo (crispy MT_MUMMY; DOOM sounds reused) ----
+    m = &mobjinfo[MT_HMUMMY];
+    m->doomednum    = -1;			// director-spawned only (no map ednum clash)
+    m->spawnstate   = S_HMUM_LOOK1;
+    m->spawnhealth  = 80;
+    m->seestate     = S_HMUM_WALK1;
+    m->seesound     = sfx_h_mumsit;
+    m->reactiontime = 8;
+    m->attacksound  = sfx_h_mumat1;
+    m->painstate    = S_HMUM_PAIN1;
+    m->painchance   = 128;
+    m->painsound    = sfx_h_mumpai;
+    m->meleestate   = S_HMUM_ATK1;
+    m->missilestate = S_NULL;
+    m->deathstate   = S_HMUM_DIE1;
+    m->xdeathstate  = S_NULL;
+    m->deathsound   = sfx_h_mumdth;
+    m->speed        = 12;
+    m->radius       = 22 * FRACUNIT;
+    m->height       = 62 * FRACUNIT;
+    m->mass         = 75;
+    m->damage       = 0;
+    m->activesound  = sfx_h_mumsit;
+    m->flags        = MF_SOLID | MF_SHOOTABLE | MF_COUNTKILL;
+    m->raisestate   = S_NULL;
+
+    // ---- Sabreclaw (clink): pure melee, no blood ----
+    ST (S_HCLK_LOOK1, SPR_HCLK,  0, 10, (actionf_p1)A_Look,        S_HCLK_LOOK2);
+    ST (S_HCLK_LOOK2, SPR_HCLK,  1, 10, (actionf_p1)A_Look,        S_HCLK_LOOK1);
+    ST (S_HCLK_WALK1, SPR_HCLK,  0,  3, (actionf_p1)A_Chase,       S_HCLK_WALK2);
+    ST (S_HCLK_WALK2, SPR_HCLK,  1,  3, (actionf_p1)A_Chase,       S_HCLK_WALK3);
+    ST (S_HCLK_WALK3, SPR_HCLK,  2,  3, (actionf_p1)A_Chase,       S_HCLK_WALK4);
+    ST (S_HCLK_WALK4, SPR_HCLK,  3,  3, (actionf_p1)A_Chase,       S_HCLK_WALK1);
+    ST (S_HCLK_ATK1,  SPR_HCLK,  4,  5, (actionf_p1)A_FaceTarget,  S_HCLK_ATK2);
+    ST (S_HCLK_ATK2,  SPR_HCLK,  5,  4, (actionf_p1)A_FaceTarget,  S_HCLK_ATK3);
+    ST (S_HCLK_ATK3,  SPR_HCLK,  6,  7, (actionf_p1)A_ClinkAttack, S_HCLK_WALK1);
+    ST (S_HCLK_PAIN1, SPR_HCLK,  7,  3, NULL,                      S_HCLK_PAIN2);
+    ST (S_HCLK_PAIN2, SPR_HCLK,  7,  3, (actionf_p1)A_Pain,        S_HCLK_WALK1);
+    ST (S_HCLK_DIE1,  SPR_HCLK,  8,  6, NULL,                      S_HCLK_DIE2);
+    ST (S_HCLK_DIE2,  SPR_HCLK,  9,  6, NULL,                      S_HCLK_DIE3);
+    ST (S_HCLK_DIE3,  SPR_HCLK, 10,  5, (actionf_p1)A_Scream,      S_HCLK_DIE4);
+    ST (S_HCLK_DIE4,  SPR_HCLK, 11,  5, (actionf_p1)A_Fall,        S_HCLK_DIE5);
+    ST (S_HCLK_DIE5,  SPR_HCLK, 12,  5, NULL,                      S_HCLK_DIE6);
+    ST (S_HCLK_DIE6,  SPR_HCLK, 13,  5, NULL,                      S_HCLK_DIE7);
+    ST (S_HCLK_DIE7,  SPR_HCLK, 14, -1, NULL,                      S_NULL);
+
+    m = &mobjinfo[MT_HCLINK];
+    m->doomednum = -1;        m->spawnstate  = S_HCLK_LOOK1; m->spawnhealth = 150;
+    m->seestate  = S_HCLK_WALK1; m->seesound  = sfx_h_clksit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_clkatk; m->painstate = S_HCLK_PAIN1; m->painchance = 32;
+    m->painsound = sfx_h_clkpai; m->meleestate = S_HCLK_ATK1;  m->missilestate = S_NULL;
+    m->deathstate = S_HCLK_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_clkdth;
+    m->speed = 14; m->radius = 20*FRACUNIT; m->height = 64*FRACUNIT; m->mass = 75;
+    m->damage = 0; m->activesound = sfx_h_clkact;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL|MF_NOBLOOD; m->raisestate = S_NULL;
+
+    // ---- Gargoyle (imp): flies; melee + skull-fly dive ----
+    ST (S_HIMP_LOOK1,  SPR_HIMP, 0, 10, (actionf_p1)A_Look,        S_HIMP_LOOK2);
+    ST (S_HIMP_LOOK2,  SPR_HIMP, 1, 10, (actionf_p1)A_Look,        S_HIMP_LOOK3);
+    ST (S_HIMP_LOOK3,  SPR_HIMP, 2, 10, (actionf_p1)A_Look,        S_HIMP_LOOK4);
+    ST (S_HIMP_LOOK4,  SPR_HIMP, 1, 10, (actionf_p1)A_Look,        S_HIMP_LOOK1);
+    ST (S_HIMP_FLY1,   SPR_HIMP, 0,  3, (actionf_p1)A_Chase,       S_HIMP_FLY2);
+    ST (S_HIMP_FLY2,   SPR_HIMP, 0,  3, (actionf_p1)A_Chase,       S_HIMP_FLY3);
+    ST (S_HIMP_FLY3,   SPR_HIMP, 1,  3, (actionf_p1)A_Chase,       S_HIMP_FLY4);
+    ST (S_HIMP_FLY4,   SPR_HIMP, 1,  3, (actionf_p1)A_Chase,       S_HIMP_FLY5);
+    ST (S_HIMP_FLY5,   SPR_HIMP, 2,  3, (actionf_p1)A_Chase,       S_HIMP_FLY6);
+    ST (S_HIMP_FLY6,   SPR_HIMP, 2,  3, (actionf_p1)A_Chase,       S_HIMP_FLY7);
+    ST (S_HIMP_FLY7,   SPR_HIMP, 1,  3, (actionf_p1)A_Chase,       S_HIMP_FLY8);
+    ST (S_HIMP_FLY8,   SPR_HIMP, 1,  3, (actionf_p1)A_Chase,       S_HIMP_FLY1);
+    ST (S_HIMP_MEATK1, SPR_HIMP, 3,  6, (actionf_p1)A_FaceTarget,  S_HIMP_MEATK2);
+    ST (S_HIMP_MEATK2, SPR_HIMP, 4,  6, (actionf_p1)A_FaceTarget,  S_HIMP_MEATK3);
+    ST (S_HIMP_MEATK3, SPR_HIMP, 5,  6, (actionf_p1)A_ImpMeAttack, S_HIMP_FLY1);
+    ST (S_HIMP_MSATK1, SPR_HIMP, 0, 10, (actionf_p1)A_FaceTarget,  S_HIMP_MSATK2);
+    ST (S_HIMP_MSATK2, SPR_HIMP, 1,  6, (actionf_p1)A_ImpMsAttack, S_HIMP_MSATK3);
+    ST (S_HIMP_MSATK3, SPR_HIMP, 2,  6, NULL,                      S_HIMP_MSATK4);
+    ST (S_HIMP_MSATK4, SPR_HIMP, 1,  6, NULL,                      S_HIMP_MSATK5);
+    ST (S_HIMP_MSATK5, SPR_HIMP, 0,  6, NULL,                      S_HIMP_MSATK6);
+    ST (S_HIMP_MSATK6, SPR_HIMP, 1,  6, NULL,                      S_HIMP_MSATK3);
+    ST (S_HIMP_PAIN1,  SPR_HIMP, 6,  3, NULL,                      S_HIMP_PAIN2);
+    ST (S_HIMP_PAIN2,  SPR_HIMP, 6,  3, (actionf_p1)A_Pain,        S_HIMP_FLY1);
+    ST (S_HIMP_DIE1,   SPR_HIMP,  6,  4, (actionf_p1)A_ImpDeath,   S_HIMP_DIE2);
+    ST (S_HIMP_DIE2,   SPR_HIMP,  7,  5, (actionf_p1)A_Scream,     S_HIMP_DIE3);
+    ST (S_HIMP_DIE3,   SPR_HIMP,  8,  6, (actionf_p1)A_Fall,       S_HIMP_DIE4);	// crash frames
+    ST (S_HIMP_DIE4,   SPR_HIMP,  9,  5, NULL,                     S_HIMP_DIE5);
+    ST (S_HIMP_DIE5,   SPR_HIMP, 10,  5, NULL,                     S_HIMP_DIE6);
+    ST (S_HIMP_DIE6,   SPR_HIMP, 11, -1, NULL,                     S_NULL);
+
+    m = &mobjinfo[MT_HIMP];
+    m->doomednum = -1;        m->spawnstate  = S_HIMP_LOOK1; m->spawnhealth = 40;
+    m->seestate  = S_HIMP_FLY1; m->seesound   = sfx_h_impsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_impat1; m->painstate = S_HIMP_PAIN1; m->painchance = 200;
+    m->painsound = sfx_h_imppai; m->meleestate = S_HIMP_MEATK1; m->missilestate = S_HIMP_MSATK1;
+    m->deathstate = S_HIMP_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_impdth;
+    m->speed = 10; m->radius = 16*FRACUNIT; m->height = 36*FRACUNIT; m->mass = 50;
+    m->damage = 0; m->activesound = sfx_h_impsit;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_FLOAT|MF_NOGRAVITY|MF_COUNTKILL; m->raisestate = S_NULL;
+
+    // ---- Undead warrior (knight): melee + thrown spinning axe ----
+    ST (S_HKNI_STND1, SPR_HKNI,  0, 10, (actionf_p1)A_Look,        S_HKNI_STND2);
+    ST (S_HKNI_STND2, SPR_HKNI,  1, 10, (actionf_p1)A_Look,        S_HKNI_STND1);
+    ST (S_HKNI_WALK1, SPR_HKNI,  0,  4, (actionf_p1)A_Chase,       S_HKNI_WALK2);
+    ST (S_HKNI_WALK2, SPR_HKNI,  1,  4, (actionf_p1)A_Chase,       S_HKNI_WALK3);
+    ST (S_HKNI_WALK3, SPR_HKNI,  2,  4, (actionf_p1)A_Chase,       S_HKNI_WALK4);
+    ST (S_HKNI_WALK4, SPR_HKNI,  3,  4, (actionf_p1)A_Chase,       S_HKNI_WALK1);
+    ST (S_HKNI_ATK1,  SPR_HKNI,  4, 10, (actionf_p1)A_FaceTarget,  S_HKNI_ATK2);
+    ST (S_HKNI_ATK2,  SPR_HKNI,  5,  8, (actionf_p1)A_FaceTarget,  S_HKNI_ATK3);
+    ST (S_HKNI_ATK3,  SPR_HKNI,  6,  8, (actionf_p1)A_KnightAttack,S_HKNI_ATK4);
+    ST (S_HKNI_ATK4,  SPR_HKNI,  4, 10, (actionf_p1)A_FaceTarget,  S_HKNI_ATK5);
+    ST (S_HKNI_ATK5,  SPR_HKNI,  5,  8, (actionf_p1)A_FaceTarget,  S_HKNI_ATK6);
+    ST (S_HKNI_ATK6,  SPR_HKNI,  6,  8, (actionf_p1)A_KnightAttack,S_HKNI_WALK1);
+    ST (S_HKNI_PAIN1, SPR_HKNI,  7,  3, NULL,                      S_HKNI_PAIN2);
+    ST (S_HKNI_PAIN2, SPR_HKNI,  7,  3, (actionf_p1)A_Pain,        S_HKNI_WALK1);
+    ST (S_HKNI_DIE1,  SPR_HKNI,  8,  6, NULL,                      S_HKNI_DIE2);
+    ST (S_HKNI_DIE2,  SPR_HKNI,  9,  6, (actionf_p1)A_Scream,      S_HKNI_DIE3);
+    ST (S_HKNI_DIE3,  SPR_HKNI, 10,  6, NULL,                      S_HKNI_DIE4);
+    ST (S_HKNI_DIE4,  SPR_HKNI, 11,  6, (actionf_p1)A_Fall,        S_HKNI_DIE5);
+    ST (S_HKNI_DIE5,  SPR_HKNI, 12,  6, NULL,                      S_HKNI_DIE6);
+    ST (S_HKNI_DIE6,  SPR_HKNI, 13,  6, NULL,                      S_HKNI_DIE7);
+    ST (S_HKNI_DIE7,  SPR_HKNI, 14, -1, NULL,                      S_NULL);
+
+    // thrown axe projectile (sprites full-bright: frame|32768); spin loops, then explode
+    ST (S_HKAX1,  SPR_HKAX, 32768, 3, (actionf_p1)A_ContMobjSound, S_HKAX2);
+    ST (S_HKAX2,  SPR_HKAX, 32769, 3, NULL,                        S_HKAX3);
+    ST (S_HKAX3,  SPR_HKAX, 32770, 3, NULL,                        S_HKAX1);
+    ST (S_HKAXX1, SPR_HKAX, 32771, 6, NULL,                        S_HKAXX2);
+    ST (S_HKAXX2, SPR_HKAX, 32772, 6, NULL,                        S_HKAXX3);
+    ST (S_HKAXX3, SPR_HKAX, 32773, 6, NULL,                        S_NULL);
+
+    m = &mobjinfo[MT_HKNIGHT];
+    m->doomednum = -1;        m->spawnstate  = S_HKNI_STND1; m->spawnhealth = 200;
+    m->seestate  = S_HKNI_WALK1; m->seesound  = sfx_h_kgtsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_kgtatk; m->painstate = S_HKNI_PAIN1; m->painchance = 100;
+    m->painsound = sfx_h_kgtpai; m->meleestate = S_HKNI_ATK1;  m->missilestate = S_HKNI_ATK1;
+    m->deathstate = S_HKNI_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_kgtdth;
+    m->speed = 12; m->radius = 24*FRACUNIT; m->height = 78*FRACUNIT; m->mass = 150;
+    m->damage = 0; m->activesound = sfx_h_kgtsit;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HKNIGHTAXE];
+    m->doomednum = -1;        m->spawnstate  = S_HKAX1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HKAXX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 9*FRACUNIT; m->radius = 10*FRACUNIT; m->height = 8*FRACUNIT; m->mass = 100;
+    m->damage = 2; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    // ====================================================================
+    // Weredragon (beast): melee + lobbed fireball
+    // ====================================================================
+    ST (S_HBEA_LOOK1, SPR_HBEA, 0, 10, (actionf_p1)A_Look,        S_HBEA_LOOK2);
+    ST (S_HBEA_LOOK2, SPR_HBEA, 1, 10, (actionf_p1)A_Look,        S_HBEA_LOOK1);
+    ST (S_HBEA_WALK1, SPR_HBEA, 0,  3, (actionf_p1)A_Chase,       S_HBEA_WALK2);
+    ST (S_HBEA_WALK2, SPR_HBEA, 1,  3, (actionf_p1)A_Chase,       S_HBEA_WALK3);
+    ST (S_HBEA_WALK3, SPR_HBEA, 2,  3, (actionf_p1)A_Chase,       S_HBEA_WALK4);
+    ST (S_HBEA_WALK4, SPR_HBEA, 3,  3, (actionf_p1)A_Chase,       S_HBEA_WALK5);
+    ST (S_HBEA_WALK5, SPR_HBEA, 4,  3, (actionf_p1)A_Chase,       S_HBEA_WALK6);
+    ST (S_HBEA_WALK6, SPR_HBEA, 5,  3, (actionf_p1)A_Chase,       S_HBEA_WALK1);
+    ST (S_HBEA_ATK1,  SPR_HBEA, 7, 10, (actionf_p1)A_FaceTarget,  S_HBEA_ATK2);
+    ST (S_HBEA_ATK2,  SPR_HBEA, 8, 10, (actionf_p1)A_BeastAttack, S_HBEA_WALK1);
+    ST (S_HBEA_PAIN1, SPR_HBEA, 6,  3, NULL,                      S_HBEA_PAIN2);
+    ST (S_HBEA_PAIN2, SPR_HBEA, 6,  3, (actionf_p1)A_Pain,        S_HBEA_WALK1);
+    ST (S_HBEA_DIE1,  SPR_HBEA, 17, 6, NULL,                      S_HBEA_DIE2);
+    ST (S_HBEA_DIE2,  SPR_HBEA, 18, 6, (actionf_p1)A_Scream,      S_HBEA_DIE3);
+    ST (S_HBEA_DIE3,  SPR_HBEA, 19, 6, NULL,                      S_HBEA_DIE4);
+    ST (S_HBEA_DIE4,  SPR_HBEA, 20, 6, NULL,                      S_HBEA_DIE5);
+    ST (S_HBEA_DIE5,  SPR_HBEA, 21, 6, NULL,                      S_HBEA_DIE6);
+    ST (S_HBEA_DIE6,  SPR_HBEA, 22, 6, (actionf_p1)A_Fall,        S_HBEA_DIE7);
+    ST (S_HBEA_DIE7,  SPR_HBEA, 23, 6, NULL,                      S_HBEA_DIE8);
+    ST (S_HBEA_DIE8,  SPR_HBEA, 24, 6, NULL,                      S_HBEA_DIE9);
+    ST (S_HBEA_DIE9,  SPR_HBEA, 25, -1, NULL,                     S_NULL);
+    ST (S_HBEB1, SPR_HBEB, 32768, 2, NULL, S_HBEB2);
+    ST (S_HBEB2, SPR_HBEB, 32768, 2, NULL, S_HBEB3);
+    ST (S_HBEB3, SPR_HBEB, 32769, 2, NULL, S_HBEB4);
+    ST (S_HBEB4, SPR_HBEB, 32769, 2, NULL, S_HBEB5);
+    ST (S_HBEB5, SPR_HBEB, 32770, 2, NULL, S_HBEB6);
+    ST (S_HBEB6, SPR_HBEB, 32770, 2, NULL, S_HBEB1);
+    ST (S_HBEBX1, SPR_HBEB, 32771, 4, NULL, S_HBEBX2);
+    ST (S_HBEBX2, SPR_HBEB, 32772, 4, NULL, S_HBEBX3);
+    ST (S_HBEBX3, SPR_HBEB, 32773, 4, NULL, S_HBEBX4);
+    ST (S_HBEBX4, SPR_HBEB, 32774, 4, NULL, S_HBEBX5);
+    ST (S_HBEBX5, SPR_HBEB, 32775, 4, NULL, S_NULL);
+
+    m = &mobjinfo[MT_HBEAST];
+    m->doomednum = -1;        m->spawnstate  = S_HBEA_LOOK1; m->spawnhealth = 220;
+    m->seestate  = S_HBEA_WALK1; m->seesound  = sfx_h_bstsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_bstatk; m->painstate = S_HBEA_PAIN1; m->painchance = 100;
+    m->painsound = sfx_h_bstpai; m->meleestate = S_HBEA_ATK1;  m->missilestate = S_HBEA_ATK1;
+    m->deathstate = S_HBEA_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_bstdth;
+    m->speed = 14; m->radius = 32*FRACUNIT; m->height = 74*FRACUNIT; m->mass = 200;
+    m->damage = 0; m->activesound = sfx_h_bstact;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HBEASTBALL];
+    m->doomednum = -1;        m->spawnstate  = S_HBEB1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HBEBX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 12*FRACUNIT; m->radius = 9*FRACUNIT; m->height = 8*FRACUNIT; m->mass = 100;
+    m->damage = 4; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    // ====================================================================
+    // Disciple (wizard): floating caster, fires bolts
+    // ====================================================================
+    ST (S_HWIZ_LOOK1, SPR_HWIZ, 0, 10, (actionf_p1)A_Look,         S_HWIZ_LOOK2);
+    ST (S_HWIZ_LOOK2, SPR_HWIZ, 1, 10, (actionf_p1)A_Look,         S_HWIZ_LOOK1);
+    ST (S_HWIZ_WALK1, SPR_HWIZ, 0,  3, (actionf_p1)A_Chase,        S_HWIZ_WALK2);
+    ST (S_HWIZ_WALK2, SPR_HWIZ, 0,  4, (actionf_p1)A_Chase,        S_HWIZ_WALK3);
+    ST (S_HWIZ_WALK3, SPR_HWIZ, 0,  3, (actionf_p1)A_Chase,        S_HWIZ_WALK4);
+    ST (S_HWIZ_WALK4, SPR_HWIZ, 0,  4, (actionf_p1)A_Chase,        S_HWIZ_WALK5);
+    ST (S_HWIZ_WALK5, SPR_HWIZ, 1,  3, (actionf_p1)A_Chase,        S_HWIZ_WALK6);
+    ST (S_HWIZ_WALK6, SPR_HWIZ, 1,  4, (actionf_p1)A_Chase,        S_HWIZ_WALK7);
+    ST (S_HWIZ_WALK7, SPR_HWIZ, 1,  3, (actionf_p1)A_Chase,        S_HWIZ_WALK8);
+    ST (S_HWIZ_WALK8, SPR_HWIZ, 1,  4, (actionf_p1)A_Chase,        S_HWIZ_WALK1);
+    ST (S_HWIZ_ATK1,  SPR_HWIZ, 2,  4, (actionf_p1)A_FaceTarget,   S_HWIZ_ATK2);
+    ST (S_HWIZ_ATK2,  SPR_HWIZ, 2,  4, (actionf_p1)A_FaceTarget,   S_HWIZ_ATK3);
+    ST (S_HWIZ_ATK3,  SPR_HWIZ, 3, 12, (actionf_p1)A_WizardAttack, S_HWIZ_WALK1);
+    ST (S_HWIZ_PAIN1, SPR_HWIZ, 4,  3, NULL,                       S_HWIZ_PAIN2);
+    ST (S_HWIZ_PAIN2, SPR_HWIZ, 4,  3, (actionf_p1)A_Pain,         S_HWIZ_WALK1);
+    ST (S_HWIZ_DIE1,  SPR_HWIZ, 5,  6, NULL,                       S_HWIZ_DIE2);
+    ST (S_HWIZ_DIE2,  SPR_HWIZ, 6,  6, (actionf_p1)A_Scream,       S_HWIZ_DIE3);
+    ST (S_HWIZ_DIE3,  SPR_HWIZ, 7,  6, NULL,                       S_HWIZ_DIE4);
+    ST (S_HWIZ_DIE4,  SPR_HWIZ, 8,  6, NULL,                       S_HWIZ_DIE5);
+    ST (S_HWIZ_DIE5,  SPR_HWIZ, 9,  6, (actionf_p1)A_Fall,         S_HWIZ_DIE6);
+    ST (S_HWIZ_DIE6,  SPR_HWIZ, 10, 6, NULL,                       S_HWIZ_DIE7);
+    ST (S_HWIZ_DIE7,  SPR_HWIZ, 11, 6, NULL,                       S_HWIZ_DIE8);
+    ST (S_HWIZ_DIE8,  SPR_HWIZ, 12, -1, NULL,                      S_NULL);
+    ST (S_HWIB1, SPR_HWIB, 32768, 6, NULL, S_HWIB2);
+    ST (S_HWIB2, SPR_HWIB, 32769, 6, NULL, S_HWIB1);
+    ST (S_HWIBX1, SPR_HWIB, 32770, 5, NULL, S_HWIBX2);
+    ST (S_HWIBX2, SPR_HWIB, 32771, 5, NULL, S_HWIBX3);
+    ST (S_HWIBX3, SPR_HWIB, 32772, 5, NULL, S_HWIBX4);
+    ST (S_HWIBX4, SPR_HWIB, 32773, 5, NULL, S_HWIBX5);
+    ST (S_HWIBX5, SPR_HWIB, 32774, 5, NULL, S_NULL);
+
+    m = &mobjinfo[MT_HWIZARD];
+    m->doomednum = -1;        m->spawnstate  = S_HWIZ_LOOK1; m->spawnhealth = 180;
+    m->seestate  = S_HWIZ_WALK1; m->seesound  = sfx_h_wizsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_wizatk; m->painstate = S_HWIZ_PAIN1; m->painchance = 64;
+    m->painsound = sfx_h_wizpai; m->meleestate = S_NULL;       m->missilestate = S_HWIZ_ATK1;
+    m->deathstate = S_HWIZ_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_wizdth;
+    m->speed = 12; m->radius = 16*FRACUNIT; m->height = 68*FRACUNIT; m->mass = 100;
+    m->damage = 0; m->activesound = sfx_h_wizact;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_FLOAT|MF_NOGRAVITY|MF_COUNTKILL; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HWIZFX];
+    m->doomednum = -1;        m->spawnstate  = S_HWIB1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HWIBX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 18*FRACUNIT; m->radius = 10*FRACUNIT; m->height = 6*FRACUNIT; m->mass = 100;
+    m->damage = 3; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    // ====================================================================
+    // Ophidian (snake): stationary-ish ranged spitter
+    // ====================================================================
+    ST (S_HSNK_LOOK1, SPR_HSNK, 0, 10, (actionf_p1)A_Look,        S_HSNK_LOOK2);
+    ST (S_HSNK_LOOK2, SPR_HSNK, 1, 10, (actionf_p1)A_Look,        S_HSNK_LOOK1);
+    ST (S_HSNK_WALK1, SPR_HSNK, 0,  4, (actionf_p1)A_Chase,       S_HSNK_WALK2);
+    ST (S_HSNK_WALK2, SPR_HSNK, 1,  4, (actionf_p1)A_Chase,       S_HSNK_WALK3);
+    ST (S_HSNK_WALK3, SPR_HSNK, 2,  4, (actionf_p1)A_Chase,       S_HSNK_WALK4);
+    ST (S_HSNK_WALK4, SPR_HSNK, 3,  4, (actionf_p1)A_Chase,       S_HSNK_WALK1);
+    ST (S_HSNK_ATK1,  SPR_HSNK, 5,  5, (actionf_p1)A_FaceTarget,  S_HSNK_ATK2);
+    ST (S_HSNK_ATK2,  SPR_HSNK, 5,  5, (actionf_p1)A_FaceTarget,  S_HSNK_ATK3);
+    ST (S_HSNK_ATK3,  SPR_HSNK, 5,  4, (actionf_p1)A_SnakeAttack, S_HSNK_ATK4);
+    ST (S_HSNK_ATK4,  SPR_HSNK, 5,  4, (actionf_p1)A_SnakeAttack, S_HSNK_ATK5);
+    ST (S_HSNK_ATK5,  SPR_HSNK, 5,  4, (actionf_p1)A_SnakeAttack, S_HSNK_WALK1);
+    ST (S_HSNK_PAIN1, SPR_HSNK, 4,  3, NULL,                      S_HSNK_PAIN2);
+    ST (S_HSNK_PAIN2, SPR_HSNK, 4,  3, (actionf_p1)A_Pain,        S_HSNK_WALK1);
+    ST (S_HSNK_DIE1,  SPR_HSNK, 6,  5, NULL,                      S_HSNK_DIE2);
+    ST (S_HSNK_DIE2,  SPR_HSNK, 7,  5, (actionf_p1)A_Scream,      S_HSNK_DIE3);
+    ST (S_HSNK_DIE3,  SPR_HSNK, 8,  5, NULL,                      S_HSNK_DIE4);
+    ST (S_HSNK_DIE4,  SPR_HSNK, 9,  5, NULL,                      S_HSNK_DIE5);
+    ST (S_HSNK_DIE5,  SPR_HSNK, 10, 5, NULL,                      S_HSNK_DIE6);
+    ST (S_HSNK_DIE6,  SPR_HSNK, 11, 5, NULL,                      S_HSNK_DIE7);
+    ST (S_HSNK_DIE7,  SPR_HSNK, 12, 5, (actionf_p1)A_Fall,        S_HSNK_DIE8);
+    ST (S_HSNK_DIE8,  SPR_HSNK, 13, 5, NULL,                      S_HSNK_DIE9);
+    ST (S_HSNK_DIE9,  SPR_HSNK, 14, 5, NULL,                      S_HSNK_DIE10);
+    ST (S_HSNK_DIE10, SPR_HSNK, 15, -1, NULL,                     S_NULL);
+    ST (S_HSNB1, SPR_HSNB, 32768, 5, NULL, S_HSNB2);
+    ST (S_HSNB2, SPR_HSNB, 32769, 5, NULL, S_HSNB3);
+    ST (S_HSNB3, SPR_HSNB, 32770, 5, NULL, S_HSNB4);
+    ST (S_HSNB4, SPR_HSNB, 32771, 5, NULL, S_HSNB1);
+    ST (S_HSNBX1, SPR_HSNB, 32772, 5, NULL, S_HSNBX2);
+    ST (S_HSNBX2, SPR_HSNB, 32773, 5, NULL, S_HSNBX3);
+    ST (S_HSNBX3, SPR_HSNB, 32774, 4, NULL, S_HSNBX4);
+    ST (S_HSNBX4, SPR_HSNB, 32775, 3, NULL, S_HSNBX5);
+    ST (S_HSNBX5, SPR_HSNB, 32776, 3, NULL, S_NULL);
+
+    m = &mobjinfo[MT_HSNAKE];
+    m->doomednum = -1;        m->spawnstate  = S_HSNK_LOOK1; m->spawnhealth = 280;
+    m->seestate  = S_HSNK_WALK1; m->seesound  = sfx_h_snksit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_snkatk; m->painstate = S_HSNK_PAIN1; m->painchance = 48;
+    m->painsound = sfx_h_snkpai; m->meleestate = S_NULL;       m->missilestate = S_HSNK_ATK1;
+    m->deathstate = S_HSNK_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_snkdth;
+    m->speed = 10; m->radius = 22*FRACUNIT; m->height = 70*FRACUNIT; m->mass = 100;
+    m->damage = 0; m->activesound = sfx_h_snkact;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HSNAKEPRO];
+    m->doomednum = -1;        m->spawnstate  = S_HSNB1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HSNBX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 14*FRACUNIT; m->radius = 12*FRACUNIT; m->height = 8*FRACUNIT; m->mass = 100;
+    m->damage = 3; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    // ====================================================================
+    // Maulotaur (minotaur): hammer swing + slam-charge + mace ball -- a miniboss (3000 hp)
+    // ====================================================================
+    ST (S_HMIN_LOOK1, SPR_HMIN, 0, 10, (actionf_p1)A_Look,          S_HMIN_LOOK2);
+    ST (S_HMIN_LOOK2, SPR_HMIN, 1, 10, (actionf_p1)A_Look,          S_HMIN_LOOK1);
+    ST (S_HMIN_WALK1, SPR_HMIN, 0,  5, (actionf_p1)A_Chase,         S_HMIN_WALK2);
+    ST (S_HMIN_WALK2, SPR_HMIN, 1,  5, (actionf_p1)A_Chase,         S_HMIN_WALK3);
+    ST (S_HMIN_WALK3, SPR_HMIN, 2,  5, (actionf_p1)A_Chase,         S_HMIN_WALK4);
+    ST (S_HMIN_WALK4, SPR_HMIN, 3,  5, (actionf_p1)A_Chase,         S_HMIN_WALK1);
+    ST (S_HMIN_ATK1_1, SPR_HMIN, 21, 10, (actionf_p1)A_FaceTarget,  S_HMIN_ATK1_2);
+    ST (S_HMIN_ATK1_2, SPR_HMIN, 22,  7, (actionf_p1)A_FaceTarget,  S_HMIN_ATK1_3);
+    ST (S_HMIN_ATK1_3, SPR_HMIN, 23, 12, (actionf_p1)A_MinotaurAtk1,S_HMIN_WALK1);
+    ST (S_HMIN_ATK2_1, SPR_HMIN, 21, 10, (actionf_p1)A_MinotaurDecide, S_HMIN_ATK2_2);
+    ST (S_HMIN_ATK2_2, SPR_HMIN, 24,  4, (actionf_p1)A_FaceTarget,  S_HMIN_ATK2_3);
+    ST (S_HMIN_ATK2_3, SPR_HMIN, 25,  9, (actionf_p1)A_MinotaurAtk2,S_HMIN_WALK1);
+    ST (S_HMIN_ATK4_1, SPR_HMIN, 20,  2, (actionf_p1)A_MinotaurCharge, S_HMIN_ATK4_1);
+    ST (S_HMIN_PAIN1, SPR_HMIN, 4,  3, NULL,                        S_HMIN_PAIN2);
+    ST (S_HMIN_PAIN2, SPR_HMIN, 4,  6, (actionf_p1)A_Pain,          S_HMIN_WALK1);
+    ST (S_HMIN_DIE1,  SPR_HMIN, 5,  6, NULL,                        S_HMIN_DIE2);
+    ST (S_HMIN_DIE2,  SPR_HMIN, 6,  5, NULL,                        S_HMIN_DIE3);
+    ST (S_HMIN_DIE3,  SPR_HMIN, 7,  6, (actionf_p1)A_Scream,        S_HMIN_DIE4);
+    ST (S_HMIN_DIE4,  SPR_HMIN, 8,  5, NULL,                        S_HMIN_DIE5);
+    ST (S_HMIN_DIE5,  SPR_HMIN, 9,  6, NULL,                        S_HMIN_DIE6);
+    ST (S_HMIN_DIE6,  SPR_HMIN, 10, 5, NULL,                        S_HMIN_DIE7);
+    ST (S_HMIN_DIE7,  SPR_HMIN, 11, 6, NULL,                        S_HMIN_DIE8);
+    ST (S_HMIN_DIE8,  SPR_HMIN, 12, 5, (actionf_p1)A_Fall,          S_HMIN_DIE9);
+    ST (S_HMIN_DIE9,  SPR_HMIN, 13, 6, NULL,                        S_HMIN_DIE10);
+    ST (S_HMIN_DIE10, SPR_HMIN, 14, 5, NULL,                        S_HMIN_DIE11);
+    ST (S_HMIN_DIE11, SPR_HMIN, 15, 6, NULL,                        S_HMIN_DIE12);
+    ST (S_HMIN_DIE12, SPR_HMIN, 16, 5, NULL,                        S_HMIN_DIE13);
+    ST (S_HMIN_DIE13, SPR_HMIN, 17, 6, NULL,                        S_HMIN_DIE14);
+    ST (S_HMIN_DIE14, SPR_HMIN, 18, 5, NULL,                        S_HMIN_DIE15);
+    ST (S_HMIN_DIE15, SPR_HMIN, 19, -1, (actionf_p1)A_BossDeath,    S_NULL);
+    ST (S_HMNA1, SPR_HMNA, 32768, 6, NULL, S_HMNA2);
+    ST (S_HMNA2, SPR_HMNA, 32769, 6, NULL, S_HMNA1);
+    ST (S_HMNAX1, SPR_HMNA, 32770, 5, NULL, S_HMNAX2);
+    ST (S_HMNAX2, SPR_HMNA, 32771, 5, NULL, S_HMNAX3);
+    ST (S_HMNAX3, SPR_HMNA, 32772, 5, NULL, S_HMNAX4);
+    ST (S_HMNAX4, SPR_HMNA, 32773, 5, NULL, S_HMNAX5);
+    ST (S_HMNAX5, SPR_HMNA, 32774, 5, NULL, S_HMNAX6);
+    ST (S_HMNAX6, SPR_HMNA, 32775, 5, NULL, S_NULL);
+
+    m = &mobjinfo[MT_HMINOTAUR];
+    m->doomednum = -1;        m->spawnstate  = S_HMIN_LOOK1; m->spawnhealth = 3000;
+    m->seestate  = S_HMIN_WALK1; m->seesound  = sfx_h_minsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_minat1; m->painstate = S_HMIN_PAIN1; m->painchance = 25;
+    m->painsound = sfx_h_minpai; m->meleestate = S_HMIN_ATK1_1; m->missilestate = S_HMIN_ATK2_1;
+    m->deathstate = S_HMIN_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_mindth;
+    m->speed = 16; m->radius = 28*FRACUNIT; m->height = 100*FRACUNIT; m->mass = 800;
+    m->damage = 0; m->activesound = sfx_h_minact;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL|MF_DROPOFF; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HMINOTAURFX];
+    m->doomednum = -1;        m->spawnstate  = S_HMNA1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HMNAX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 20*FRACUNIT; m->radius = 10*FRACUNIT; m->height = 6*FRACUNIT; m->mass = 100;
+    m->damage = 4; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    // ====================================================================
+    // Iron Lich (head): floating boss -- ice ball + homing whirlwind (700 hp)
+    // ====================================================================
+    ST (S_HIRO_LOOK,  SPR_HIRO, 0, 10, (actionf_p1)A_Look,        S_HIRO_LOOK);
+    ST (S_HIRO_FLOAT, SPR_HIRO, 0,  4, (actionf_p1)A_Chase,       S_HIRO_FLOAT);
+    ST (S_HIRO_ATK1,  SPR_HIRO, 0,  5, (actionf_p1)A_FaceTarget,  S_HIRO_ATK2);
+    ST (S_HIRO_ATK2,  SPR_HIRO, 1, 20, (actionf_p1)A_LichAttack,  S_HIRO_FLOAT);
+    ST (S_HIRO_PAIN1, SPR_HIRO, 0,  4, NULL,                      S_HIRO_PAIN2);
+    ST (S_HIRO_PAIN2, SPR_HIRO, 0,  4, (actionf_p1)A_Pain,        S_HIRO_FLOAT);
+    ST (S_HIRO_DIE1,  SPR_HIRO, 2,  7, NULL,                      S_HIRO_DIE2);
+    ST (S_HIRO_DIE2,  SPR_HIRO, 3,  7, (actionf_p1)A_Scream,      S_HIRO_DIE3);
+    ST (S_HIRO_DIE3,  SPR_HIRO, 4,  7, NULL,                      S_HIRO_DIE4);
+    ST (S_HIRO_DIE4,  SPR_HIRO, 5,  7, NULL,                      S_HIRO_DIE5);
+    ST (S_HIRO_DIE5,  SPR_HIRO, 6,  7, (actionf_p1)A_Fall,        S_HIRO_DIE6);
+    ST (S_HIRO_DIE6,  SPR_HIRO, 7,  7, NULL,                      S_HIRO_DIE7);
+    ST (S_HIRO_DIE7,  SPR_HIRO, 8, -1, (actionf_p1)A_BossDeath,   S_NULL);
+    ST (S_HIRB1, SPR_HIRB, 0, 6, NULL, S_HIRB2);
+    ST (S_HIRB2, SPR_HIRB, 1, 6, NULL, S_HIRB3);
+    ST (S_HIRB3, SPR_HIRB, 2, 6, NULL, S_HIRB1);
+    ST (S_HIRBX1, SPR_HIRB, 3, 5, NULL, S_HIRBX2);
+    ST (S_HIRBX2, SPR_HIRB, 4, 5, NULL, S_HIRBX3);
+    ST (S_HIRBX3, SPR_HIRB, 5, 5, NULL, S_HIRBX4);
+    ST (S_HIRBX4, SPR_HIRB, 6, 5, NULL, S_NULL);
+    ST (S_HIRX1, SPR_HIRX, 3, 3, NULL,                  S_HIRX2);
+    ST (S_HIRX2, SPR_HIRX, 4, 3, NULL,                  S_HIRX3);
+    ST (S_HIRX3, SPR_HIRX, 5, 3, NULL,                  S_HIRX4);
+    ST (S_HIRX4, SPR_HIRX, 6, 3, NULL,                  S_HIRX5);
+    ST (S_HIRX5, SPR_HIRX, 0, 3, (actionf_p1)A_WhirlwindSeek,  S_HIRX6);
+    ST (S_HIRX6, SPR_HIRX, 1, 3, (actionf_p1)A_WhirlwindSeek,  S_HIRX7);
+    ST (S_HIRX7, SPR_HIRX, 2, 3, (actionf_p1)A_WhirlwindSeek,  S_HIRX5);
+    ST (S_HIRXX1, SPR_HIRX, 6, 4, NULL, S_HIRXX2);
+    ST (S_HIRXX2, SPR_HIRX, 6, 4, NULL, S_NULL);
+
+    m = &mobjinfo[MT_HIRONLICH];
+    m->doomednum = -1;        m->spawnstate  = S_HIRO_LOOK;  m->spawnhealth = 700;
+    m->seestate  = S_HIRO_FLOAT; m->seesound  = sfx_h_hedsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_hedat1; m->painstate = S_HIRO_PAIN1; m->painchance = 32;
+    m->painsound = sfx_h_hedpai; m->meleestate = S_HIRO_ATK1;  m->missilestate = S_HIRO_ATK1;
+    m->deathstate = S_HIRO_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_heddth;
+    m->speed = 6; m->radius = 40*FRACUNIT; m->height = 72*FRACUNIT; m->mass = 325;
+    m->damage = 0; m->activesound = sfx_h_hedact;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL|MF_FLOAT|MF_NOGRAVITY|MF_NOBLOOD;
+    m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HHEADFX1];
+    m->doomednum = -1;        m->spawnstate  = S_HIRB1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HIRBX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 13*FRACUNIT; m->radius = 12*FRACUNIT; m->height = 6*FRACUNIT; m->mass = 100;
+    m->damage = 2; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HWHIRLWIND];
+    m->doomednum = -1;        m->spawnstate  = S_HIRX1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HIRXX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_None;
+    m->speed = 10*FRACUNIT; m->radius = 16*FRACUNIT; m->height = 74*FRACUNIT; m->mass = 100;
+    m->damage = 2; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    // ====================================================================
+    // D'Sparil (phase-2 sorcerer): the final boss -- floats, hurls exploding blue bolts.
+    // (Serpent phase 1, teleport and wizard-summon omitted; no SDTH death sprite extracted,
+    //  so the death is a brief fade on the body frame.)  3500 hp.
+    // ====================================================================
+    ST (S_HSR2_LOOK1, SPR_HSR2, 12, 10, (actionf_p1)A_Look,        S_HSR2_LOOK2);
+    ST (S_HSR2_LOOK2, SPR_HSR2, 13, 10, (actionf_p1)A_Look,        S_HSR2_LOOK1);
+    ST (S_HSR2_WALK1, SPR_HSR2, 12, 4, (actionf_p1)A_Chase,        S_HSR2_WALK2);
+    ST (S_HSR2_WALK2, SPR_HSR2, 13, 4, (actionf_p1)A_Chase,        S_HSR2_WALK3);
+    ST (S_HSR2_WALK3, SPR_HSR2, 14, 4, (actionf_p1)A_Chase,        S_HSR2_WALK4);
+    ST (S_HSR2_WALK4, SPR_HSR2, 15, 4, (actionf_p1)A_Chase,        S_HSR2_WALK1);
+    ST (S_HSR2_ATK1,  SPR_HSR2, 17, 9, (actionf_p1)A_FaceTarget,   S_HSR2_ATK2);
+    ST (S_HSR2_ATK2,  SPR_HSR2, 18, 9, (actionf_p1)A_FaceTarget,   S_HSR2_ATK3);
+    ST (S_HSR2_ATK3,  SPR_HSR2, 19, 20, (actionf_p1)A_DsparilAttack, S_HSR2_WALK1);
+    ST (S_HSR2_PAIN1, SPR_HSR2, 16, 3, NULL,                       S_HSR2_PAIN2);
+    ST (S_HSR2_PAIN2, SPR_HSR2, 16, 6, (actionf_p1)A_Pain,         S_HSR2_WALK1);
+    // No SDTH death sprite was extracted, so the death animates with the SOR2
+    // teleport-fade poses (frames 6..11 = the sorcerer dematerialising) -- a real
+    // multi-frame death that walks through distinct frames and ends as a corpse.
+    ST (S_HSR2_DIE1,  SPR_HSR2, 16, 8, (actionf_p1)A_Scream,       S_HSR2_DIE2);
+    ST (S_HSR2_DIE2,  SPR_HSR2,  6, 7, NULL,                       S_HSR2_DIE3);
+    ST (S_HSR2_DIE3,  SPR_HSR2,  7, 7, (actionf_p1)A_Fall,         S_HSR2_DIE4);
+    ST (S_HSR2_DIE4,  SPR_HSR2,  8, 7, NULL,                       S_HSR2_DIE5);
+    ST (S_HSR2_DIE5,  SPR_HSR2,  9, 7, NULL,                       S_HSR2_DIE6);
+    ST (S_HSR2_DIE6,  SPR_HSR2, 10, -1, (actionf_p1)A_BossDeath,   S_NULL);
+    ST (S_HSRB1, SPR_HSRB, 32768, 3, NULL, S_HSRB2);
+    ST (S_HSRB2, SPR_HSRB, 32769, 3, NULL, S_HSRB3);
+    ST (S_HSRB3, SPR_HSRB, 32770, 3, NULL, S_HSRB1);
+    ST (S_HSRBX1, SPR_HSRB, 32774, 5, (actionf_p1)A_Explode, S_HSRBX2);
+    ST (S_HSRBX2, SPR_HSRB, 32775, 5, NULL, S_HSRBX3);
+    ST (S_HSRBX3, SPR_HSRB, 32776, 5, NULL, S_HSRBX4);
+    ST (S_HSRBX4, SPR_HSRB, 32777, 5, NULL, S_HSRBX5);
+    ST (S_HSRBX5, SPR_HSRB, 32778, 5, NULL, S_HSRBX6);
+    ST (S_HSRBX6, SPR_HSRB, 32779, 5, NULL, S_NULL);
+
+    m = &mobjinfo[MT_HDSPARIL];
+    m->doomednum = -1;        m->spawnstate  = S_HSR2_LOOK1; m->spawnhealth = 3500;
+    m->seestate  = S_HSR2_WALK1; m->seesound  = sfx_h_sorsit;  m->reactiontime = 8;
+    m->attacksound = sfx_h_soratk; m->painstate = S_HSR2_PAIN1; m->painchance = 32;
+    m->painsound = sfx_h_sorpai; m->meleestate = S_HSR2_ATK1;  m->missilestate = S_HSR2_ATK1;
+    m->deathstate = S_HSR2_DIE1; m->xdeathstate = S_NULL;    m->deathsound = sfx_h_sordexp;
+    m->speed = 14; m->radius = 16*FRACUNIT; m->height = 70*FRACUNIT; m->mass = 150;
+    m->damage = 0; m->activesound = sfx_h_soract;
+    m->flags = MF_SOLID|MF_SHOOTABLE|MF_COUNTKILL|MF_FLOAT|MF_NOGRAVITY; m->raisestate = S_NULL;
+
+    m = &mobjinfo[MT_HDSPARILFX];
+    m->doomednum = -1;        m->spawnstate  = S_HSRB1;      m->spawnhealth = 1000;
+    m->seestate  = S_NULL;       m->seesound  = sfx_None;    m->reactiontime = 8;
+    m->attacksound = sfx_None;   m->painstate = S_NULL;      m->painchance = 0;
+    m->painsound = sfx_None;     m->meleestate = S_NULL;     m->missilestate = S_NULL;
+    m->deathstate = S_HSRBX1;    m->xdeathstate = S_NULL;    m->deathsound = sfx_firxpl;
+    m->speed = 20*FRACUNIT; m->radius = 10*FRACUNIT; m->height = 6*FRACUNIT; m->mass = 100;
+    m->damage = 2; m->activesound = sfx_None;
+    m->flags = MF_NOBLOCKMAP|MF_MISSILE|MF_DROPOFF|MF_NOGRAVITY; m->raisestate = S_NULL;
+}
+
+// hereticstuff.wad sprites loaded?  (the mummy's first frame lump)
+int Heretic_Available (void)
+{
+    // Test the PARSED sprite, not a lump name: the mummy's on-disk lump is the native
+    // MUMMA1 (H* are BuddyDoom's placeholder codes, remapped to native at load), so
+    // W_CheckNumForName("HMUMA1") was always -1 -> this returned false in heretic_mode.
+    // sprites[SPR_HMUM] is populated once R_InitSprites has parsed the remapped frames.
+    return numsprites > SPR_HMUM && sprites[SPR_HMUM].numframes > 0;
+}
+
+// Map a name to a Heretic mobjtype, or -1 if unknown (default "" -> mummy).
+int Heretic_TypeByName (const char* name)
+{
+    if (!name || !name[0] || !strcmp (name, "mummy"))           return MT_HMUMMY;
+    if (!strcmp (name, "clink") || !strcmp (name, "sabreclaw")) return MT_HCLINK;
+    if (!strcmp (name, "imp")   || !strcmp (name, "gargoyle"))  return MT_HIMP;
+    if (!strcmp (name, "knight")|| !strcmp (name, "undead"))    return MT_HKNIGHT;
+    if (!strcmp (name, "beast") || !strcmp (name, "weredragon")) return MT_HBEAST;
+    if (!strcmp (name, "wizard")|| !strcmp (name, "disciple"))  return MT_HWIZARD;
+    if (!strcmp (name, "snake") || !strcmp (name, "ophidian"))  return MT_HSNAKE;
+    if (!strcmp (name, "maulotaur")||!strcmp (name, "minotaur")) return MT_HMINOTAUR;
+    if (!strcmp (name, "ironlich") ||!strcmp (name, "lich"))     return MT_HIRONLICH;
+    if (!strcmp (name, "dsparil") ||!strcmp (name, "sorcerer")) return MT_HDSPARIL;
+    // gzdoom class-name aliases (../gzdoom/wadsrc/static/zscript/actors/heretic) for
+    // the same ten, plus the leader/ghost variants from heretic_mvar.c.
+    if (!strcmp (name, "hereticimp")) return MT_HIMP;
+    if (!strcmp (name, "hereticimpleader") || !strcmp (name, "gargoyleleader")
+	|| !strcmp (name, "impleader"))                     return MT_HIMPLEADER;
+    if (!strcmp (name, "mummyleader") || !strcmp (name, "nitrogolem")
+	|| !strcmp (name, "golemleader"))                   return MT_HMUMMYLEADER;
+    if (!strcmp (name, "mummyghost") || !strcmp (name, "golemghost"))
+							    return MT_HMUMMYGHOST;
+    if (!strcmp (name, "mummyleaderghost") || !strcmp (name, "nitrogolemghost"))
+							    return MT_HMUMMYLEADERGHOST;
+    if (!strcmp (name, "knightghost") || !strcmp (name, "undeadghost"))
+							    return MT_HKNIGHTGHOST;
+    if (!strcmp (name, "sorcerer1") || !strcmp (name, "dsparil1")
+	|| !strcmp (name, "dsparilmount"))                  return MT_HSORC1;
+    if (!strcmp (name, "sorcerer2") || !strcmp (name, "dsparil2")) return MT_HDSPARIL;
+    if (!strcmp (name, "lichling"))                         return MT_LICHLING;
+    if (!strcmp (name, "chicken"))                          return MT_CHICKEN;
+    if (!strcmp (name, "pod"))                              return MT_HPOD;
+    if (!strcmp (name, "volcano"))                          return MT_HVOLCANO;
+    return -1;
+}
+
+mobj_t* Heretic_Spawn (int type, fixed_t x, fixed_t y)
+{
+    if (!Heretic_Available () || type < 0)
+	return NULL;
+    return P_SpawnMonsterChecked (x, y, (mobjtype_t)type);	// (C) only if it fits + fits the sector
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 map-thing resolution: real Heretic map doomednums -> our mobjtypes.
+// Doomednums are from crispy-doom's heretic/info.c.  Only the 10 ported monsters
+// + 10 artifacts (and a couple of trivial DOOM pickup substitutions so the player
+// isn't starved) resolve; everything else returns -1 so P_SpawnMapThing skips it
+// (an unported Heretic decoration/key just doesn't appear -- no crash).
+// ---------------------------------------------------------------------------
+int P_HereticThingType (int doomednum)
+{
+    switch (doomednum)
+    {
+	// ---- the 10 monsters (crispy heretic doomednums) ----
+	case 68: return MT_HMUMMY;	// Mummy / Golem
+	case 90: return MT_HCLINK;	// Sabreclaw
+	case 66: return MT_HIMP;	// Gargoyle (gold)
+	case  5: return MT_HIMPLEADER;	// Gargoyle leader (fires fireballs -- files/heretic_mvar.c)
+	case 64: return MT_HKNIGHT;	// Undead Warrior (Knight)
+	case 65: return MT_HKNIGHTGHOST;	// Undead Warrior ghost (files/heretic_mvar.c)
+	case 70: return MT_HBEAST;	// Weredragon
+	case 15: return MT_HWIZARD;	// Disciple of D'Sparil
+	case 92: return MT_HSNAKE;	// Ophidian
+	case  9: return MT_HMINOTAUR;	// Maulotaur
+	case  6: return MT_HIRONLICH;	// Iron Lich
+	case  7: return MT_HSORC1;	// D'Sparil phase 1 (serpent-mount; rises to phase 2 -- files/heretic_mvar.c)
+	case 45: return MT_HMUMMYLEADER;	// Nitrogolem / Golem leader (files/heretic_mvar.c)
+	case 46: return MT_HMUMMYLEADERGHOST;	// Golem leader ghost
+	case 69: return MT_HMUMMYGHOST;	// Golem ghost
+
+	case 14: return MT_TELEPORTMAN;	// teleport destination (same ednum as DOOM) --
+					// without this the tagged landing spot never spawns
+					// and EV_Teleport finds no target (teleporters dead)
+
+	// ---- the 10 artifacts (crispy heretic doomednums) ----
+	case 82: return MT_HARTI_FLASK;		// Quartz Flask
+	case 32: return MT_HARTI_URN;		// Mystic Urn
+	case 86: return MT_HARTI_TOME;		// Tome of Power
+	case 33: return MT_HARTI_TORCH;		// Torch
+	case 34: return MT_HARTI_BOMB;		// Time Bomb of the Ancients
+	case 84: return MT_HARTI_RING;		// Ring of Invincibility
+	case 75: return MT_HARTI_SHADOW;	// Shadowsphere
+	case 36: return MT_HARTI_CHAOS;		// Chaos Device
+	case 83: return MT_HARTI_WINGS;		// Wings of Wrath
+	case 30: return MT_HARTI_EGG;		// Morph Ovum
+
+	// ---- (H) map-placeable Heretic items/pickups (files/heretic_items.c) ----
+	// Faithful sprites + doomednums; EFFECTS out of scope (touch handled
+	// minimally in P_TouchHereticItem).  These supersede the old trivial
+	// DOOM substitutions for 81/10/12.
+	case 73: return MT_HAKYY;	// green key
+	case 79: return MT_HBKYY;	// blue key
+	case 80: return MT_HCKYY;	// yellow key
+	case 10: return MT_HAMGWNDWIMPY;	// wand crystal (gold-wand ammo, wimpy)
+	case 12: return MT_HAMGWNDHEFTY;	// crystal geode (gold-wand ammo, hefty)
+	case 13: return MT_HAMMACEWIMPY;	// mace spheres (wimpy)
+	case 16: return MT_HAMMACEHEFTY;	// mace spheres (hefty)
+	case 18: return MT_HAMCBOWWIMPY;	// ethereal arrows (wimpy)
+	case 19: return MT_HAMCBOWHEFTY;	// quiver of ethereal arrows (hefty)
+	case 20: return MT_HAMSKRDWIMPY;	// lesser runes (wimpy)
+	case 21: return MT_HAMSKRDHEFTY;	// greater runes (hefty)
+	case 22: return MT_HAMPHRDWIMPY;	// flame orb (wimpy)
+	case 23: return MT_HAMPHRDHEFTY;	// inferno orb (hefty)
+	case 54: return MT_HAMBLSRWIMPY;	// claw orb (wimpy)
+	case 55: return MT_HAMBLSRHEFTY;	// energy orb (hefty)
+	case 2002: return MT_HWMACE;		// Firemace
+	case 2004: return MT_HWSKULLROD;	// Hellstaff
+	case 2003: return MT_HWPHOENIXROD;	// Phoenix Rod
+	case 2001: return MT_HWCROSSBOW;	// Ethereal Crossbow
+	case 2005: return MT_HWGAUNTLETS;	// Gauntlets of the Necromancer
+	case 53: return MT_HWBLASTER;		// Dragon Claw
+	case 85: return MT_HITEMSHIELD1;	// Silver Shield
+	case 31: return MT_HITEMSHIELD2;	// Enchanted Shield
+	case 81: return MT_HCRYSTALVIAL;	// Crystal Vial (health)
+
+	// ---- (H) map-placeable Heretic decorations / scenery (files/heretic_deco.c) ----
+	case 2035: return MT_HPOD;		// Volcano pod (shootable) -- 2035 == DOOM barrel, heretic-mode only
+	case 43: return MT_HPODGEN;		// Pod generator
+	case 17: return MT_HSKULLHANG70;	// Hanging skull (70)
+	case 24: return MT_HSKULLHANG60;	// Hanging skull (60)
+	case 25: return MT_HSKULLHANG45;	// Hanging skull (45)
+	case 26: return MT_HSKULLHANG35;	// Hanging skull (35)
+	case 28: return MT_HCHANDELIER;		// Chandelier
+	case 27: return MT_HSERPTORCH;		// Serpent torch
+	case 29: return MT_HSMALLPILLAR;	// Small pillar
+	case 37: return MT_HSTALAGMITESMALL;	// Stalagmite (small)
+	case 38: return MT_HSTALAGMITELARGE;	// Stalagmite (large)
+	case 39: return MT_HSTALACTITESMALL;	// Stalactite (small)
+	case 40: return MT_HSTALACTITELARGE;	// Stalactite (large)
+	case 76: return MT_HFIREBRAZIER;	// Fire brazier
+	case 44: return MT_HBARREL;		// Barrel
+	case 47: return MT_HBRPILLAR;		// Brown pillar
+	case 48: return MT_HMOSS1;		// Hanging moss 1
+	case 49: return MT_HMOSS2;		// Hanging moss 2
+	case 50: return MT_HWALLTORCH;		// Wall torch
+	case 51: return MT_HHANGINGCORPSE;	// Hanging corpse
+	case 94: return MT_HKEYGIZMOBLUE;	// Blue key gizmo
+	case 95: return MT_HKEYGIZMOGREEN;	// Green key gizmo
+	case 96: return MT_HKEYGIZMOYELLOW;	// Yellow key gizmo
+	case 87: return MT_HVOLCANO;		// Volcano
+	case 74: return MT_HTELEGLITGEN;	// Teleport glitter generator
+	case 52: return MT_HTELEGLITGEN2;	// Teleport glitter generator 2
+	case 42: return MT_HSOUNDWIND;		// Ambient wind (silent marker)
+	case 41: return MT_HSOUNDWATERFALL;	// Ambient waterfall (silent marker)
+
+	default: return -1;		// unported Heretic thing -> skip
+    }
+}

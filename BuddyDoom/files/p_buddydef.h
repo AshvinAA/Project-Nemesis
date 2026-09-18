@@ -1,0 +1,84 @@
+// Emacs style mode select   -*- C -*-
+//-----------------------------------------------------------------------------
+//
+// DESCRIPTION:
+//	Native modder co-op buddies (BuddyDoom).
+//
+//	Reads BUDDYDEF text lumps straight out of the loaded WADs -- no external
+//	compiler (no decohack/DEHACKED needed).  Each record is a ROSTER entry: a
+//	name, description, preview sprite, colour and a set of properties, listed on
+//	the Buddy select menu.
+//
+//	A buddy is ALWAYS player 2 (files/p_ai_coop.c), which is what gives it door
+//	use, orders, the HUD strip, the automap marker, revive, the pathfinder,
+//	weapons and savegame support for free.  A record therefore never defines an
+//	actor: no mobjtype, no states, no attack codepointer.  (An earlier design did
+//	exactly that and made every modder buddy a monster -- which cannot open a
+//	door, be ordered, be revived or show up on the HUD.)
+//
+//	A record's properties ARE applied to player 2 at runtime (files/p_ai_coop.c),
+//	while the AI co-op bot stays the brain: skin (R_SetBuddySkin), body stats
+//	(health/radius/height at spawn), colour, the named ability (P_Buddy_AbilityTicker),
+//	behaviour stats (speed/painchance/reactiontime), the buddy's own see/pain/death/
+//	active sounds, and its BUDDYDEF melee/ranged attack (P_Buddy_DoAttack).  Slot 0 is
+//	the stock Marine.  All applied per-instance/per-tic, so mobj_t + savegames are
+//	untouched.  Design: docs/BUDDYDEF.md.
+//
+//-----------------------------------------------------------------------------
+
+#ifndef __P_BUDDYDEF_H__
+#define __P_BUDDYDEF_H__
+
+// Parse every BUDDYDEF lump in the loaded WADs and register the buddies.
+// MUST run after WAD init (and after DEHACKED, so it can see DSDHacked things)
+// but BEFORE R_Init -- so R_InitSpriteDefs picks up the buddies' sprite names.
+void	P_Buddy_LoadDefs (void);
+
+// --- roster, for the Buddy select menu -------------------------------------
+// Slot 0 is always the built-in "Marine"; slots 1..N are BUDDYDEF buddies.
+int		P_Buddy_Count (void);		// >= 1 (Marine is always present)
+const char*	P_Buddy_Name (int slot);	// display name
+const char*	P_Buddy_Desc (int slot);	// one/two-line description
+int		P_Buddy_Sprite (int slot);	// spritenum for the preview (SPR_PLAY for Marine)
+int		P_Buddy_Color  (int slot);	// declared default colour index (BUDDYDEF `color`), -1 = none
+int		P_Buddy_ColorLocked (int slot);	// BUDDYDEF `color 0`: colour is fixed, menu row inert
+
+// Stats shown on the Buddy select screen (all definable in BUDDYDEF).
+typedef struct {
+    int		health, speed, radius, height, mass, painchance, reactiontime;
+    const char*	melee;		// close-range attack style (BUDDYDEF `meleeattack`)
+    const char*	ranged;		// at-distance attack style (BUDDYDEF `rangedattack`)
+    const char*	monster;	// base monster the buddy derives from (BUDDYDEF `monster`)
+    const char*	special;	// free-text special abilities (blurb)
+    const char*	ability;	// NAMED ability: none | drone | poisoncloud | turret
+} buddystats_t;
+void	P_Buddy_GetStats (int slot, buddystats_t* out);
+
+// BUDDYDEF sound lump names (see/pain/death/active) -- the co-op driver reprograms the
+// buddy sfx slots with these so player 2 uses the selected buddy's voice.  "" = not set.
+enum { BUDDYSND_SEE, BUDDYSND_PAIN, BUDDYSND_DEATH, BUDDYSND_ACTIVE };
+const char* P_Buddy_Sound (int slot, int which);
+
+// BUDDYDEF `ability` -- the mechanic the buddy actually uses in play, as opposed to the
+// `special` blurb.  P_Buddy_AbilityTicker runs it once per tic (called from P_Ticker) on
+// the buddy player's body; the Marine's own "drone" runs inside the marine bot instead,
+// so the ticker stays out of the way while slot 0 is selected.
+const char*	P_Buddy_Ability (int slot);
+void		P_Buddy_AbilityTicker (void);
+
+// BUDDYDEF `frames <monster>`: player frame number -> this buddy's sheet frame, for a
+// body drawn with monster art.  NULL = draw player frames unchanged.  Presentation only.
+#define BUDDY_NFRAMES	29		// Doom frames run A..] (0..28) -- map size
+#define BUDDY_NPLAYFRAMES 23		// ...but the PLAYER sheet only reaches W (0..22)
+const byte*	P_Buddy_FrameMap (int slot);
+
+// Turn every buddy's `basemonster` into its frame map.  MUST be called after R_Init:
+// the per-game name resolvers read sprites[], which R_InitSprites builds there.
+void		P_Buddy_ResolveFrames (void);
+
+// BUDDYDEF `damagescale` (percent) for the mobj that dealt damage, else 100.  A buddy
+// borrowing a MONSTER attack has its damage baked into the codepointer, so this central
+// multiplier is the only place that reaches melee, hitscan and projectiles alike.
+int		P_Buddy_DamageScale (struct mobj_s* source);
+
+#endif

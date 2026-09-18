@@ -1,0 +1,2151 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	Status bar code.
+//	Does the face/direction indicator animatin.
+//	Does palette indicators as well (red pain/berserk, bright pickup)
+//
+//-----------------------------------------------------------------------------
+
+static const char
+rcsid[] = "$Id: st_stuff.c,v 1.6 1997/02/03 22:45:13 b1 Exp $";
+
+
+#include <stdio.h>
+
+#include "i_system.h"
+#include "i_video.h"
+#include "z_zone.h"
+#include "m_random.h"
+#include "w_wad.h"
+
+#include "doomdef.h"
+
+#include "g_game.h"
+
+#include "st_stuff.h"
+#include "st_sbardef.h"	// ID24 SBARDEF data-driven status bar
+#include "st_lib.h"
+#include "r_local.h"
+
+#include "p_local.h"
+#include "p_inter.h"
+
+#include "am_map.h"
+#include "m_cheat.h"
+
+#include "s_sound.h"
+
+// Needs access to LFB.
+#include "v_video.h"
+
+// State.
+#include "doomstat.h"
+
+// Data.
+#include "dstrings.h"
+#include "sounds.h"
+
+//
+// STATUS BAR DATA
+//
+
+
+// Palette indices.
+// For damage/bonus red-/gold-shifts
+#define STARTREDPALS		1
+#define STARTBONUSPALS		9
+#define NUMREDPALS			8
+#define NUMBONUSPALS		4
+// Radiation suit, green shift.
+#define RADIATIONPAL		13
+
+// N/256*100% probability
+//  that the normal face state will change
+#define ST_FACEPROBABILITY		96
+
+// For Responder
+#define ST_TOGGLECHAT		KEY_ENTER
+
+// Location of status bar
+#define ST_X				(0 + WIDESCREENDELTA)
+#define ST_X2				104
+
+#define ST_FX  			(143 + WIDESCREENDELTA)
+#define ST_FY  			169
+
+// Should be set to patch width
+//  for tall numbers later on
+#define ST_TALLNUMWIDTH		(tallnum[0]->width)
+
+// Number of status faces.
+#define ST_NUMPAINFACES		5
+#define ST_NUMSTRAIGHTFACES	3
+#define ST_NUMTURNFACES		2
+#define ST_NUMSPECIALFACES		3
+
+#define ST_FACESTRIDE \
+          (ST_NUMSTRAIGHTFACES+ST_NUMTURNFACES+ST_NUMSPECIALFACES)
+
+#define ST_NUMEXTRAFACES		2
+
+#define ST_NUMFACES \
+          (ST_FACESTRIDE*ST_NUMPAINFACES+ST_NUMEXTRAFACES)
+
+#define ST_TURNOFFSET		(ST_NUMSTRAIGHTFACES)
+#define ST_OUCHOFFSET		(ST_TURNOFFSET + ST_NUMTURNFACES)
+#define ST_EVILGRINOFFSET		(ST_OUCHOFFSET + 1)
+#define ST_RAMPAGEOFFSET		(ST_EVILGRINOFFSET + 1)
+#define ST_GODFACE			(ST_NUMPAINFACES*ST_FACESTRIDE)
+#define ST_DEADFACE			(ST_GODFACE+1)
+
+#define ST_FACESX			(143 + WIDESCREENDELTA)
+#define ST_FACESY			168
+
+#define ST_EVILGRINCOUNT		(2*TICRATE)
+#define ST_STRAIGHTFACECOUNT	(TICRATE/2)
+#define ST_TURNCOUNT		(1*TICRATE)
+#define ST_OUCHCOUNT		(1*TICRATE)
+#define ST_RAMPAGEDELAY		(2*TICRATE)
+
+#define ST_MUCHPAIN			20
+
+
+// Location and size of statistics,
+//  justified according to widget type.
+// Problem is, within which space? STbar? Screen?
+// Note: this could be read in by a lump.
+//       Problem is, is the stuff rendered
+//       into a buffer,
+//       or into the frame buffer?
+
+// AMMO number pos.
+#define ST_AMMOWIDTH		3	
+#define ST_AMMOX			(44 + WIDESCREENDELTA)
+#define ST_AMMOY			171
+
+// HEALTH number pos.
+#define ST_HEALTHWIDTH		3	
+#define ST_HEALTHX			(90 + WIDESCREENDELTA)
+#define ST_HEALTHY			171
+
+// Weapon pos.
+#define ST_ARMSX			(111 + WIDESCREENDELTA)
+#define ST_ARMSY			172
+#define ST_ARMSBGX			(104 + WIDESCREENDELTA)
+#define ST_ARMSBGY			168
+#define ST_ARMSXSPACE		12
+#define ST_ARMSYSPACE		10
+
+// Frags pos.
+#define ST_FRAGSX			(138 + WIDESCREENDELTA)
+#define ST_FRAGSY			171	
+#define ST_FRAGSWIDTH		2
+
+// ARMOR number pos.
+#define ST_ARMORWIDTH		3
+#define ST_ARMORX			(221 + WIDESCREENDELTA)
+#define ST_ARMORY			171
+
+// Key icon positions.
+#define ST_KEY0WIDTH		8
+#define ST_KEY0HEIGHT		5
+#define ST_KEY0X			(239 + WIDESCREENDELTA)
+#define ST_KEY0Y			171
+#define ST_KEY1WIDTH		ST_KEY0WIDTH
+#define ST_KEY1X			(239 + WIDESCREENDELTA)
+#define ST_KEY1Y			181
+#define ST_KEY2WIDTH		ST_KEY0WIDTH
+#define ST_KEY2X			(239 + WIDESCREENDELTA)
+#define ST_KEY2Y			191
+
+// Ammunition counter.
+#define ST_AMMO0WIDTH		3
+#define ST_AMMO0HEIGHT		6
+#define ST_AMMO0X			(288 + WIDESCREENDELTA)
+#define ST_AMMO0Y			173
+#define ST_AMMO1WIDTH		ST_AMMO0WIDTH
+#define ST_AMMO1X			(288 + WIDESCREENDELTA)
+#define ST_AMMO1Y			179
+#define ST_AMMO2WIDTH		ST_AMMO0WIDTH
+#define ST_AMMO2X			(288 + WIDESCREENDELTA)
+#define ST_AMMO2Y			191
+#define ST_AMMO3WIDTH		ST_AMMO0WIDTH
+#define ST_AMMO3X			(288 + WIDESCREENDELTA)
+#define ST_AMMO3Y			185
+
+// Indicate maximum ammunition.
+// Only needed because backpack exists.
+#define ST_MAXAMMO0WIDTH		3
+#define ST_MAXAMMO0HEIGHT		5
+#define ST_MAXAMMO0X		(314 + WIDESCREENDELTA)
+#define ST_MAXAMMO0Y		173
+#define ST_MAXAMMO1WIDTH		ST_MAXAMMO0WIDTH
+#define ST_MAXAMMO1X		(314 + WIDESCREENDELTA)
+#define ST_MAXAMMO1Y		179
+#define ST_MAXAMMO2WIDTH		ST_MAXAMMO0WIDTH
+#define ST_MAXAMMO2X		(314 + WIDESCREENDELTA)
+#define ST_MAXAMMO2Y		191
+#define ST_MAXAMMO3WIDTH		ST_MAXAMMO0WIDTH
+#define ST_MAXAMMO3X		(314 + WIDESCREENDELTA)
+#define ST_MAXAMMO3Y		185
+
+// pistol
+#define ST_WEAPON0X			(110 + WIDESCREENDELTA)
+#define ST_WEAPON0Y			172
+
+// shotgun
+#define ST_WEAPON1X			(122 + WIDESCREENDELTA)
+#define ST_WEAPON1Y			172
+
+// chain gun
+#define ST_WEAPON2X			(134 + WIDESCREENDELTA)
+#define ST_WEAPON2Y			172
+
+// missile launcher
+#define ST_WEAPON3X			(110 + WIDESCREENDELTA)
+#define ST_WEAPON3Y			181
+
+// plasma gun
+#define ST_WEAPON4X			(122 + WIDESCREENDELTA)
+#define ST_WEAPON4Y			181
+
+ // bfg
+#define ST_WEAPON5X			(134 + WIDESCREENDELTA)
+#define ST_WEAPON5Y			181
+
+// WPNS title
+#define ST_WPNSX			(109 + WIDESCREENDELTA)
+#define ST_WPNSY			191
+
+ // DETH title
+#define ST_DETHX			(109 + WIDESCREENDELTA)
+#define ST_DETHY			191
+
+//Incoming messages window location
+//UNUSED
+// #define ST_MSGTEXTX	   (viewwindowx)
+// #define ST_MSGTEXTY	   (viewwindowy+viewheight-18)
+#define ST_MSGTEXTX			0
+#define ST_MSGTEXTY			0
+// Dimensions given in characters.
+#define ST_MSGWIDTH			52
+// Or shall I say, in lines?
+#define ST_MSGHEIGHT		1
+
+#define ST_OUTTEXTX			0
+#define ST_OUTTEXTY			6
+
+// Width, in characters again.
+#define ST_OUTWIDTH			52 
+ // Height, in lines. 
+#define ST_OUTHEIGHT		1
+
+#define ST_MAPWIDTH	\
+    (strlen(mapnames[(gameepisode-1)*9+(gamemap-1)]))
+
+#define ST_MAPTITLEX \
+    (SCREENWIDTH - ST_MAPWIDTH * ST_CHATFONTWIDTH)
+
+#define ST_MAPTITLEY		0
+#define ST_MAPHEIGHT		1
+
+	    
+// main player in game
+static player_t*	plyr; 
+
+// ST_Start() has just been called
+static boolean		st_firsttime;
+
+// used to execute ST_Init() only once
+static int		veryfirsttime = 1;
+
+// lump number for PLAYPAL
+static int		lu_palette;
+
+// used for timing
+static unsigned int	st_clock;
+
+// used for making messages go away
+static int		st_msgcounter=0;
+
+// used when in chat 
+static st_chatstateenum_t	st_chatstate;
+
+// whether in automap or first-person
+static st_stateenum_t	st_gamestate;
+
+// whether left-side main status bar is active
+static boolean		st_statusbaron;
+
+// whether status bar chat is active
+static boolean		st_chat;
+
+// value of st_chat before message popped up
+static boolean		st_oldchat;
+
+// whether chat window has the cursor on
+static boolean		st_cursoron;
+
+// !deathmatch
+static boolean		st_notdeathmatch; 
+
+// !deathmatch && st_statusbaron
+static boolean		st_armson;
+
+// !deathmatch
+static boolean		st_fragson; 
+
+// main bar left
+static patch_t*		sbar;
+
+// 0-9, tall numbers
+static patch_t*		tallnum[10];
+
+// tall % sign
+static patch_t*		tallpercent;
+
+// 0-9, short, yellow (,different!) numbers
+static patch_t*		shortnum[10];
+
+// 3 key-cards, 3 skulls
+static patch_t*		keys[NUMCARDS]; 
+
+// face status patches
+static patch_t*		faces[ST_NUMFACES];
+
+// face background
+static patch_t*		faceback;
+
+ // main bar right
+static patch_t*		armsbg;
+
+// weapon ownership patches
+static patch_t*		arms[6][2]; 
+
+// ready-weapon widget
+extern int colored_numbers;	// m_misc.c config -- Options -> Features
+
+static st_number_t	w_ready;
+
+ // in deathmatch only, summary of frags stats
+static st_number_t	w_frags;
+
+// health widget
+static st_percent_t	w_health;
+
+// arms background
+static st_binicon_t	w_armsbg; 
+
+
+// weapon ownership widgets
+static st_multicon_t	w_arms[6];
+
+// face status widget
+static st_multicon_t	w_faces; 
+
+// keycard widgets
+static st_multicon_t	w_keyboxes[3];
+
+// armor widget
+static st_percent_t	w_armor;
+
+// ammo widgets
+static st_number_t	w_ammo[4];
+
+// max ammo widgets
+static st_number_t	w_maxammo[4]; 
+
+
+
+ // number of frags so far in deathmatch
+static int	st_fragscount;
+
+// used to use appopriately pained face
+static int	st_oldhealth = -1;
+
+// used for evil grin
+static boolean	oldweaponsowned[NUMWEAPONS]; 
+
+ // count until face changes
+static int	st_facecount = 0;
+
+// current face index, used by w_faces
+static int	st_faceindex = 0;
+
+// holds key-type for each key box on bar
+static int	keyboxes[3]; 
+
+// a random number per tick
+static int	st_randomnumber;  
+
+
+
+// Massive bunches of cheat shit
+//  to keep it from being easy to figure them out.
+// Yeah, right...
+unsigned char	cheat_mus_seq[] =
+{
+    0xb2, 0x26, 0xb6, 0xae, 0xea, 1, 0, 0, 0xff
+};
+
+unsigned char	cheat_choppers_seq[] =
+{
+    0xb2, 0x26, 0xe2, 0x32, 0xf6, 0x2a, 0x2a, 0xa6, 0x6a, 0xea, 0xff // id...
+};
+
+unsigned char	cheat_god_seq[] =
+{
+    0xb2, 0x26, 0x26, 0xaa, 0x26, 0xff  // iddqd
+};
+
+unsigned char	cheat_ammo_seq[] =
+{
+    0xb2, 0x26, 0xf2, 0x66, 0xa2, 0xff	// idkfa
+};
+
+unsigned char	cheat_ammonokey_seq[] =
+{
+    0xb2, 0x26, 0x66, 0xa2, 0xff	// idfa
+};
+
+
+// Smashing Pumpkins Into Samml Piles Of Putried Debris. 
+unsigned char	cheat_noclip_seq[] =
+{
+    0xb2, 0x26, 0xea, 0x2a, 0xb2,	// idspispopd
+    0xea, 0x2a, 0xf6, 0x2a, 0x26, 0xff
+};
+
+//
+unsigned char	cheat_commercial_noclip_seq[] =
+{
+    0xb2, 0x26, 0xe2, 0x36, 0xb2, 0x2a, 0xff	// idclip
+}; 
+
+
+
+unsigned char	cheat_powerup_seq[7][10] =
+{
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0x6e, 0xff }, 	// beholdv
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0xea, 0xff }, 	// beholds
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0xb2, 0xff }, 	// beholdi
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0x6a, 0xff }, 	// beholdr
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0xa2, 0xff }, 	// beholda
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0x36, 0xff }, 	// beholdl
+    { 0xb2, 0x26, 0x62, 0xa6, 0x32, 0xf6, 0x36, 0x26, 0xff }		// behold
+};
+
+
+unsigned char	cheat_clev_seq[] =
+{
+    0xb2, 0x26,  0xe2, 0x36, 0xa6, 0x6e, 1, 0, 0, 0xff	// idclev
+};
+
+
+// my position cheat
+unsigned char	cheat_mypos_seq[] =
+{
+    0xb2, 0x26, 0xb6, 0xba, 0x2a, 0xf6, 0xea, 0xff	// idmypos
+}; 
+
+
+// Now what?
+cheatseq_t	cheat_mus = { cheat_mus_seq, 0 };
+cheatseq_t	cheat_god = { cheat_god_seq, 0 };
+cheatseq_t	cheat_ammo = { cheat_ammo_seq, 0 };
+cheatseq_t	cheat_ammonokey = { cheat_ammonokey_seq, 0 };
+cheatseq_t	cheat_noclip = { cheat_noclip_seq, 0 };
+cheatseq_t	cheat_commercial_noclip = { cheat_commercial_noclip_seq, 0 };
+
+cheatseq_t	cheat_powerup[7] =
+{
+    { cheat_powerup_seq[0], 0 },
+    { cheat_powerup_seq[1], 0 },
+    { cheat_powerup_seq[2], 0 },
+    { cheat_powerup_seq[3], 0 },
+    { cheat_powerup_seq[4], 0 },
+    { cheat_powerup_seq[5], 0 },
+    { cheat_powerup_seq[6], 0 }
+};
+
+cheatseq_t	cheat_choppers = { cheat_choppers_seq, 0 };
+cheatseq_t	cheat_clev = { cheat_clev_seq, 0 };
+cheatseq_t	cheat_mypos = { cheat_mypos_seq, 0 };
+
+
+// 
+extern char*	mapnames[];
+
+
+//
+// STATUS BAR CODE
+//
+void ST_Stop(void);
+
+void ST_refreshBackground(void)
+{
+
+    if (st_statusbaron)
+    {
+	V_DrawPatch(ST_X, 0, BG, sbar);
+
+	if (netgame)
+	    V_DrawPatch(ST_FX, 0, BG, faceback);
+
+	V_CopyRect(ST_X, 0, BG, ST_WIDTH, ST_HEIGHT, ST_X, ST_Y, FG);
+    }
+
+}
+
+
+// Respond to keyboard input events,
+//  intercept cheats.
+boolean
+ST_Responder (event_t* ev)
+{
+  int		i;
+    
+  // Filter automap on/off.
+  if (ev->type == ev_keyup
+      && ((ev->data1 & 0xffff0000) == AM_MSGHEADER))
+  {
+    switch(ev->data1)
+    {
+      case AM_MSGENTERED:
+	st_gamestate = AutomapState;
+	st_firsttime = true;
+	break;
+	
+      case AM_MSGEXITED:
+	//	fprintf(stderr, "AM exited\n");
+	st_gamestate = FirstPersonState;
+	break;
+    }
+  }
+
+  // if a user keypress...
+  else if (ev->type == ev_keydown)
+  {
+    if (!netgame)
+    {
+      // b. - enabled for more debug fun.
+      // if (gameskill != sk_nightmare) {
+      
+      // 'dqd' cheat for toggleable god mode
+      if (cht_CheckCheat(&cheat_god, ev->data1))
+      {
+	plyr->cheats ^= CF_GODMODE;
+	if (plyr->cheats & CF_GODMODE)
+	{
+	  if (plyr->mo)
+	    plyr->mo->health = 100;
+	  
+	  plyr->health = 100;
+	  plyr->message = STSTR_DQDON;
+	}
+	else 
+	  plyr->message = STSTR_DQDOFF;
+      }
+      // 'fa' cheat for killer fucking arsenal
+      else if (cht_CheckCheat(&cheat_ammonokey, ev->data1))
+      {
+	plyr->armorpoints = 200;
+	plyr->armortype = 2;
+	
+	for (i=0;i<NUMWEAPONS;i++)
+	  plyr->weaponowned[i] = true;
+	
+	for (i=0;i<NUMAMMO;i++)
+	  plyr->ammo[i] = plyr->maxammo[i];
+	
+	plyr->message = STSTR_FAADDED;
+      }
+      // 'kfa' cheat for key full ammo
+      else if (cht_CheckCheat(&cheat_ammo, ev->data1))
+      {
+	plyr->armorpoints = 200;
+	plyr->armortype = 2;
+	
+	for (i=0;i<NUMWEAPONS;i++)
+	  plyr->weaponowned[i] = true;
+	
+	for (i=0;i<NUMAMMO;i++)
+	  plyr->ammo[i] = plyr->maxammo[i];
+	
+	for (i=0;i<NUMCARDS;i++)
+	  plyr->cards[i] = true;
+	
+	plyr->message = STSTR_KFAADDED;
+      }
+      // 'mus' cheat for changing music
+      else if (cht_CheckCheat(&cheat_mus, ev->data1))
+      {
+	
+	char	buf[3];
+	int		musnum;
+	
+	plyr->message = STSTR_MUS;
+	cht_GetParam(&cheat_mus, buf);
+	
+	if (gamemode == commercial)
+	{
+	  musnum = mus_runnin + (buf[0]-'0')*10 + buf[1]-'0' - 1;
+	  
+	  if (((buf[0]-'0')*10 + buf[1]-'0') > 35)
+	    plyr->message = STSTR_NOMUS;
+	  else
+	    S_ChangeMusic(musnum, 1);
+	}
+	else
+	{
+	  musnum = mus_e1m1 + (buf[0]-'1')*9 + (buf[1]-'1');
+	  
+	  if (((buf[0]-'1')*9 + buf[1]-'1') > 31)
+	    plyr->message = STSTR_NOMUS;
+	  else
+	    S_ChangeMusic(musnum, 1);
+	}
+      }
+      // Simplified, accepting both "noclip" and "idspispopd".
+      // no clipping mode cheat
+      else if ( cht_CheckCheat(&cheat_noclip, ev->data1) 
+		|| cht_CheckCheat(&cheat_commercial_noclip,ev->data1) )
+      {	
+	plyr->cheats ^= CF_NOCLIP;
+	
+	if (plyr->cheats & CF_NOCLIP)
+	  plyr->message = STSTR_NCON;
+	else
+	  plyr->message = STSTR_NCOFF;
+      }
+      // 'behold?' power-up cheats
+      for (i=0;i<6;i++)
+      {
+	if (cht_CheckCheat(&cheat_powerup[i], ev->data1))
+	{
+	  if (!plyr->powers[i])
+	    P_GivePower( plyr, i);
+	  else if (i!=pw_strength)
+	    plyr->powers[i] = 1;
+	  else
+	    plyr->powers[i] = 0;
+	  
+	  plyr->message = STSTR_BEHOLDX;
+	}
+      }
+      
+      // 'behold' power-up menu
+      if (cht_CheckCheat(&cheat_powerup[6], ev->data1))
+      {
+	plyr->message = STSTR_BEHOLD;
+      }
+      // 'choppers' invulnerability & chainsaw
+      else if (cht_CheckCheat(&cheat_choppers, ev->data1))
+      {
+	plyr->weaponowned[wp_chainsaw] = true;
+	plyr->powers[pw_invulnerability] = true;
+	plyr->message = STSTR_CHOPPERS;
+      }
+      // 'mypos' for player position
+      else if (cht_CheckCheat(&cheat_mypos, ev->data1))
+      {
+	static char	buf[ST_MSGWIDTH];
+	sprintf(buf, "ang=0x%x;x,y=(0x%x,0x%x)",
+		players[consoleplayer].mo->angle,
+		players[consoleplayer].mo->x,
+		players[consoleplayer].mo->y);
+	plyr->message = buf;
+      }
+    }
+    
+    // 'clev' change-level cheat
+    if (cht_CheckCheat(&cheat_clev, ev->data1))
+    {
+      char		buf[3];
+      int		epsd;
+      int		map;
+      
+      cht_GetParam(&cheat_clev, buf);
+      
+      if (gamemode == commercial)
+      {
+	epsd = 0;
+	map = (buf[0] - '0')*10 + buf[1] - '0';
+      }
+      else
+      {
+	epsd = buf[0] - '0';
+	map = buf[1] - '0';
+      }
+
+      // Catch invalid maps.
+      if (epsd < 1)
+	return false;
+
+      if (map < 1)
+	return false;
+      
+      // Ohmygod - this is not going to work.
+      if ((gamemode == retail)
+	  && ((epsd > 4) || (map > 9)))
+	return false;
+
+      if ((gamemode == registered)
+	  && ((epsd > 3) || (map > 9)))
+	return false;
+
+      if ((gamemode == shareware)
+	  && ((epsd > 1) || (map > 9)))
+	return false;
+
+      if ((gamemode == commercial)
+	&& (( epsd > 1) || (map > 34)))
+	return false;
+
+      // So be it.
+      plyr->message = STSTR_CLEV;
+      G_DeferedInitNew(gameskill, epsd, map);
+    }    
+  }
+  return false;
+}
+
+
+
+int ST_calcPainOffset(void)
+{
+    int		health;
+    static int	lastcalc;
+    static int	oldhealth = -1;
+    
+    health = plyr->health > 100 ? 100 : plyr->health;
+
+    if (health != oldhealth)
+    {
+	lastcalc = ST_FACESTRIDE * (((100 - health) * ST_NUMPAINFACES) / 101);
+	oldhealth = health;
+    }
+    return lastcalc;
+}
+
+
+//
+// This is a not-very-pretty routine which handles
+//  the face states and their timing.
+// the precedence of expressions is:
+//  dead > evil grin > turned head > straight ahead
+//
+void ST_updateFaceWidget(void)
+{
+    int		i;
+    angle_t	badguyangle;
+    angle_t	diffang;
+    static int	lastattackdown = -1;
+    static int	priority = 0;
+    boolean	doevilgrin;
+
+    if (priority < 10)
+    {
+	// dead
+	if (!plyr->health)
+	{
+	    priority = 9;
+	    st_faceindex = ST_DEADFACE;
+	    st_facecount = 1;
+	}
+    }
+
+    if (priority < 9)
+    {
+	if (plyr->bonuscount)
+	{
+	    // picking up bonus
+	    doevilgrin = false;
+
+	    for (i=0;i<NUMWEAPONS;i++)
+	    {
+		if (oldweaponsowned[i] != plyr->weaponowned[i])
+		{
+		    doevilgrin = true;
+		    oldweaponsowned[i] = plyr->weaponowned[i];
+		}
+	    }
+	    if (doevilgrin) 
+	    {
+		// evil grin if just picked up weapon
+		priority = 8;
+		st_facecount = ST_EVILGRINCOUNT;
+		st_faceindex = ST_calcPainOffset() + ST_EVILGRINOFFSET;
+	    }
+	}
+
+    }
+  
+    if (priority < 8)
+    {
+	if (plyr->damagecount
+	    && plyr->attacker
+	    && plyr->attacker != plyr->mo)
+	{
+	    // being attacked
+	    priority = 7;
+
+	    if (st_oldhealth - plyr->health > ST_MUCHPAIN)	// fixed: a big DROP (vanilla had the subtraction reversed, so the ouch face almost never showed)
+	    {
+		st_facecount = ST_TURNCOUNT;
+		st_faceindex = ST_calcPainOffset() + ST_OUCHOFFSET;
+	    }
+	    else
+	    {
+		badguyangle = R_PointToAngle2(plyr->mo->x,
+					      plyr->mo->y,
+					      plyr->attacker->x,
+					      plyr->attacker->y);
+		
+		if (badguyangle > plyr->mo->angle)
+		{
+		    // whether right or left
+		    diffang = badguyangle - plyr->mo->angle;
+		    i = diffang > ANG180; 
+		}
+		else
+		{
+		    // whether left or right
+		    diffang = plyr->mo->angle - badguyangle;
+		    i = diffang <= ANG180; 
+		} // confusing, aint it?
+
+		
+		st_facecount = ST_TURNCOUNT;
+		st_faceindex = ST_calcPainOffset();
+		
+		if (diffang < ANG45)
+		{
+		    // head-on    
+		    st_faceindex += ST_RAMPAGEOFFSET;
+		}
+		else if (i)
+		{
+		    // turn face right
+		    st_faceindex += ST_TURNOFFSET;
+		}
+		else
+		{
+		    // turn face left
+		    st_faceindex += ST_TURNOFFSET+1;
+		}
+	    }
+	}
+    }
+  
+    if (priority < 7)
+    {
+	// getting hurt because of your own damn stupidity
+	if (plyr->damagecount)
+	{
+	    if (st_oldhealth - plyr->health > ST_MUCHPAIN)	// fixed: a big DROP (see above)
+	    {
+		priority = 7;
+		st_facecount = ST_TURNCOUNT;
+		st_faceindex = ST_calcPainOffset() + ST_OUCHOFFSET;
+	    }
+	    else
+	    {
+		priority = 6;
+		st_facecount = ST_TURNCOUNT;
+		st_faceindex = ST_calcPainOffset() + ST_RAMPAGEOFFSET;
+	    }
+
+	}
+
+    }
+  
+    if (priority < 6)
+    {
+	// rapid firing
+	if (plyr->attackdown)
+	{
+	    if (lastattackdown==-1)
+		lastattackdown = ST_RAMPAGEDELAY;
+	    else if (!--lastattackdown)
+	    {
+		priority = 5;
+		st_faceindex = ST_calcPainOffset() + ST_RAMPAGEOFFSET;
+		st_facecount = 1;
+		lastattackdown = 1;
+	    }
+	}
+	else
+	    lastattackdown = -1;
+
+    }
+  
+    if (priority < 5)
+    {
+	// invulnerability
+	if ((plyr->cheats & CF_GODMODE)
+	    || plyr->powers[pw_invulnerability])
+	{
+	    priority = 4;
+
+	    st_faceindex = ST_GODFACE;
+	    st_facecount = 1;
+
+	}
+
+    }
+
+    // look left or look right if the facecount has timed out
+    if (!st_facecount)
+    {
+	st_faceindex = ST_calcPainOffset() + (st_randomnumber % 3);
+	st_facecount = ST_STRAIGHTFACECOUNT;
+	priority = 0;
+    }
+
+    st_facecount--;
+
+}
+
+void ST_updateWidgets(void)
+{
+    static int	largeammo = 1994; // means "n/a"
+    int		i;
+
+    // must redirect the pointer if the ready weapon has changed.
+    //  if (w_ready.data != plyr->readyweapon)
+    //  {
+    if (weaponinfo[plyr->readyweapon].ammo == am_noammo)
+	w_ready.num = &largeammo;
+    else
+	w_ready.num = &plyr->ammo[weaponinfo[plyr->readyweapon].ammo];
+    //{
+    // static int tic=0;
+    // static int dir=-1;
+    // if (!(tic&15))
+    //   plyr->ammo[weaponinfo[plyr->readyweapon].ammo]+=dir;
+    // if (plyr->ammo[weaponinfo[plyr->readyweapon].ammo] == -100)
+    //   dir = 1;
+    // tic++;
+    // }
+    w_ready.data = plyr->readyweapon;
+
+    // if (*w_ready.on)
+    //  STlib_updateNum(&w_ready, true);
+    // refresh weapon change
+    //  }
+
+    // update keycard multiple widgets
+    for (i=0;i<3;i++)
+    {
+	keyboxes[i] = plyr->cards[i] ? i : -1;
+
+	if (plyr->cards[i+3])
+	    keyboxes[i] = i+3;
+    }
+
+    // refresh everything if this is him coming back to life
+    ST_updateFaceWidget();
+
+    // used by the w_armsbg widget
+    st_notdeathmatch = !deathmatch;
+    
+    // used by w_arms[] widgets
+    st_armson = st_statusbaron && !deathmatch; 
+
+    // used by w_frags widget
+    st_fragson = deathmatch && st_statusbaron; 
+    st_fragscount = 0;
+
+    for (i=0 ; i<MAXPLAYERS ; i++)
+    {
+	if (i != consoleplayer)
+	    st_fragscount += plyr->frags[i];
+	else
+	    st_fragscount -= plyr->frags[i];
+    }
+
+    // get rid of chat window if up because of message
+    if (!--st_msgcounter)
+	st_chat = st_oldchat;
+
+}
+
+void ST_Ticker (void)
+{
+
+    st_clock++;
+    st_randomnumber = M_Random();
+    ST_updateWidgets();
+    st_oldhealth = plyr->health;
+
+}
+
+static int st_palette = 0;
+
+void ST_doPaletteStuff(void)
+{
+
+    int		palette;
+    byte*	pal;
+    int		cnt;
+    int		bzc;
+
+    cnt = plyr->damagecount;
+
+    if (plyr->powers[pw_strength])
+    {
+	// slowly fade the berzerk out
+  	bzc = 12 - (plyr->powers[pw_strength]>>6);
+
+	if (bzc > cnt)
+	    cnt = bzc;
+    }
+	
+    if (cnt)
+    {
+	palette = (cnt+7)>>3;
+	
+	if (palette >= NUMREDPALS)
+	    palette = NUMREDPALS-1;
+
+	palette += STARTREDPALS;
+    }
+
+    else if (plyr->bonuscount)
+    {
+	palette = (plyr->bonuscount+7)>>3;
+
+	if (palette >= NUMBONUSPALS)
+	    palette = NUMBONUSPALS-1;
+
+	palette += STARTBONUSPALS;
+    }
+
+    else if ( plyr->powers[pw_ironfeet] > 4*32
+	      || plyr->powers[pw_ironfeet]&8)
+	palette = RADIATIONPAL;
+    else
+	palette = 0;
+
+    if (palette != st_palette)
+    {
+	st_palette = palette;
+	pal = (byte *) W_CacheLumpNum (lu_palette, PU_CACHE)+palette*768;
+	I_SetPalette (pal);
+    }
+
+}
+
+void ST_drawWidgets(boolean refresh)
+{
+    int		i;
+
+    // used by w_arms[] widgets
+    st_armson = st_statusbaron && !deathmatch;
+
+    // used by w_frags widget
+    st_fragson = deathmatch && st_statusbaron; 
+
+    // Ready ammo, coloured by fraction of the clip left (Boom: <25% red, <50% gold,
+    // over max blue, else green).  A backpack doubles maxammo, so halve it back or
+    // every count would read "full" once you pick one up -- same fix as Woof's.
+    {
+	extern const byte* st_num_xlat;
+	ammotype_t at = weaponinfo[plyr->readyweapon].ammo;
+	st_num_xlat = NULL;
+	if (colored_numbers && at != am_noammo && plyr->maxammo[at] > 0)
+	{
+	    int mx = plyr->maxammo[at];
+	    int am = plyr->ammo[at];
+	    if (plyr->backpack) mx /= 2;
+	    st_num_xlat = (plyr->powers[pw_invulnerability] || (plyr->cheats & CF_GODMODE))
+			    ? V_ColorRange (VP_CR_GRAY)
+			: V_ColorRange (am * 100 < 25 * mx ? VP_CR_RED
+				      : am * 100 < 50 * mx ? VP_CR_GOLD
+				      : am > mx            ? VP_CR_BLUE2
+				      : VP_CR_GREEN);
+	}
+	STlib_updateNum(&w_ready, refresh);
+	st_num_xlat = NULL;
+    }
+
+    for (i=0;i<4;i++)
+    {
+	STlib_updateNum(&w_ammo[i], refresh);
+	STlib_updateNum(&w_maxammo[i], refresh);
+    }
+
+    // Coloured numbers (Boom/MBF, config `colored_numbers`, Options -> Features):
+    // health and armor by value -- <25 red, <50 gold, <=100 green, above max blue --
+    // and the ready-ammo count by how full the clip is, which is the reading you
+    // actually want mid-fight.  Invulnerability greys everything out, like Woof.
+    // Set st_num_xlat around each widget; NULL restores the stock red font.
+    extern const byte* st_num_xlat;
+    if (colored_numbers)
+    {
+	boolean invul = (plyr->powers[pw_invulnerability] || (plyr->cheats & CF_GODMODE));
+	const byte* gray = V_ColorRange (VP_CR_GRAY);
+
+	st_num_xlat = invul ? gray : V_HealthTrans (plyr->health);
+	STlib_updatePercent(&w_health, refresh);
+	// Armor: the ARMOUR CLASS decides, not the point count -- 0 none, 1 green
+	// armor, 2 blue -- so the colour tells you which vest you are wearing.
+	st_num_xlat = invul ? gray
+		    : V_ColorRange (!plyr->armortype     ? VP_CR_RED
+				  : plyr->armortype == 1 ? VP_CR_GREEN
+				  : VP_CR_BLUE2);
+	STlib_updatePercent(&w_armor, refresh);
+	st_num_xlat = NULL;
+    }
+    else
+    {
+	st_num_xlat = NULL;
+	STlib_updatePercent(&w_health, refresh);
+	STlib_updatePercent(&w_armor, refresh);
+    }
+
+    STlib_updateBinIcon(&w_armsbg, refresh);
+
+    for (i=0;i<6;i++)
+	STlib_updateMultIcon(&w_arms[i], refresh);
+
+    STlib_updateMultIcon(&w_faces, refresh);
+
+    for (i=0;i<3;i++)
+	STlib_updateMultIcon(&w_keyboxes[i], refresh);
+
+    STlib_updateNum(&w_frags, refresh);
+
+}
+
+void ST_doRefresh(void)
+{
+
+    st_firsttime = false;
+
+    // draw status bar background to off-screen buff
+    ST_refreshBackground();
+
+    // and refresh all widgets
+    ST_drawWidgets(true);
+
+}
+
+void ST_diffDraw(void)
+{
+    // update all widgets
+    ST_drawWidgets(false);
+}
+
+// ===========================================================================
+//  Heretic status bar
+//
+//  heretic.wad has no DOOM status-bar art (STBAR/STTNUM/STF*), so the DOOM bar
+//  renders black + "!".  Heretic's own bar (BARBACK @ y158, STATBAR overlay,
+//  IN0-9 numbers, the health CHAIN + LIFEGEM) IS present -- draw it, ported from
+//  crispy-doom heretic/sb_bar.c (DrawMainBar layout).  Drawn directly to screen 0
+//  at absolute base (320x200) coords (V_DrawPatch scales for hires), so it needs
+//  none of the DOOM screens[4]/ST_HEIGHT compositing.  Layout matches Heretic; the
+//  animated Corvus face, artifacts/inventory and Tome/flight icons need Heretic
+//  subsystems not present yet and are omitted.  Ammo shows the current (still-DOOM)
+//  weapon's ammo until the Heretic weapon set is ported.
+// ===========================================================================
+extern int	heretic_mode;
+extern int	strife_mode;
+
+static patch_t*	h_barback;
+static patch_t*	h_statbar;
+static patch_t*	h_chain;
+static patch_t*	h_chainback;
+static patch_t*	h_lifegem;
+static patch_t*	h_blacksq;
+static patch_t*	h_inum[10];
+static patch_t*	h_ykey;
+static patch_t*	h_gkey;
+static patch_t*	h_bkey;
+// (H) inventory bar
+static patch_t*	h_invbar;
+static patch_t*	h_selectbox;
+static patch_t*	h_invgeml[2];
+static patch_t*	h_invgemr[2];
+static patch_t*	h_smnum[10];
+static patch_t*	h_artiicon[NUMARTIFACTS];	// lazy per-artifact icon (NULL = none/uncached)
+static int	h_sb_loaded;
+
+static patch_t* ST_HCache (const char* n)		// NULL if the lump is absent
+{
+    int l = W_CheckNumForName ((char*) n);
+    return (l >= 0) ? (patch_t*) W_CacheLumpNum (l, PU_STATIC) : NULL;
+}
+
+static void ST_HereticLoad (void)
+{
+    int i; char nm[9];
+    if (h_sb_loaded) return;
+    h_sb_loaded = 1;
+    h_barback   = ST_HCache ("BARBACK");
+    // Heretic ships TWO main-bar overlays (crispy sb_bar.c SB_Init): LIFEBAR is
+    // the single-player frame (health/armor/keys/artifact), STATBAR is the
+    // deathmatch frame (frags).  Vanilla picks by mode -- we were always using
+    // STATBAR, so single-player showed the deathmatch bar.
+    h_statbar   = ST_HCache (deathmatch ? "STATBAR" : "LIFEBAR");
+    h_chain     = ST_HCache ("CHAIN");
+    h_chainback = ST_HCache ("CHAINBACK");
+    h_lifegem   = ST_HCache ("LIFEGEM2");		// single-player gem
+    if (!h_lifegem) h_lifegem = ST_HCache ("LIFEGEM0");
+    h_blacksq   = ST_HCache ("BLACKSQ");
+    for (i = 0; i < 10; i++) { sprintf (nm, "IN%d", i); h_inum[i] = ST_HCache (nm); }
+    h_ykey = ST_HCache ("YKEYICON");
+    h_gkey = ST_HCache ("GKEYICON");
+    h_bkey = ST_HCache ("BKEYICON");
+    // (H) inventory bar art
+    h_invbar    = ST_HCache ("INVBAR");
+    h_selectbox = ST_HCache ("SELECTBO");	// 8-char truncation of "SELECTBOX"
+    h_invgeml[0] = ST_HCache ("INVGEML1"); h_invgeml[1] = ST_HCache ("INVGEML2");
+    h_invgemr[0] = ST_HCache ("INVGEMR1"); h_invgemr[1] = ST_HCache ("INVGEMR2");
+    for (i = 0; i < 10; i++) { sprintf (nm, "SMALLIN%d", i); h_smnum[i] = ST_HCache (nm); }
+}
+
+// Map a BuddyDoom artifact slot to its Heretic inventory-icon lump (NULL = none:
+// the DOOM overflow/ammo slots + flechette have no Heretic icon and are skipped).
+static const char* ST_HArtiIconName (artitype_t a)
+{
+    switch (a)
+    {
+      case h_arti_flask:  return "ARTIPTN2";	// Quartz Flask
+      case h_arti_urn:    return "ARTISPHL";	// Mystic Urn
+      case h_arti_tome:   return "ARTIPWBK";	// Tome of Power
+      case h_arti_torch:  return "ARTITRCH";	// Torch
+      case h_arti_bomb:   return "ARTIFBMB";	// Time Bomb
+      case h_arti_ring:   return "ARTIINVU";	// Ring of Invincibility
+      case h_arti_shadow: return "ARTIINVS";	// Shadowsphere
+      case h_arti_chaos:  return "ARTIATLP";	// Chaos Device
+      case h_arti_wings:  return "ARTISOAR";	// Wings of Wrath
+      case h_arti_egg:    return "ARTIEGGC";	// Morph Ovum
+      default:            return NULL;
+    }
+}
+
+static patch_t* ST_HArtiIcon (artitype_t a)		// cached
+{
+    const char* nm;
+    if (a <= arti_none || a >= NUMARTIFACTS) return NULL;
+    if (h_artiicon[a]) return h_artiicon[a];
+    nm = ST_HArtiIconName (a);
+    return nm ? (h_artiicon[a] = ST_HCache (nm)) : NULL;
+}
+
+// Small SMALLIN count under an artifact icon (crispy DrSmallNumber: a count of 1
+// draws nothing; tens at x, ones at x+4).
+static void ST_HDrSmallNumber (int val, int x, int y)
+{
+    if (val <= 1) return;
+    if (val > 9 && h_smnum[val/10]) V_DrawPatch (x, y, 0, h_smnum[val/10]);
+    val %= 10;
+    if (h_smnum[val]) V_DrawPatch (x + 4, y, 0, h_smnum[val]);
+}
+
+// Right-justified small (IN) number at x,y -- crispy DrINumber layout (9px cells).
+static void ST_HDrINumber (int val, int x, int y)
+{
+    int oldval = val;
+    if (val < 0)   val = 0;
+    if (val > 999) val = 999;
+    if (val > 99 && h_inum[val/100])                   V_DrawPatch (x,      y, 0, h_inum[val/100]);
+    val %= 100;
+    if ((val > 9 || oldval > 99) && h_inum[val/10])    V_DrawPatch (x + 9,  y, 0, h_inum[val/10]);
+    val %= 10;
+    if (h_inum[val])                                   V_DrawPatch (x + 18, y, 0, h_inum[val]);
+}
+
+// The inventory bar pops up (over the main-bar stat area) for a few seconds after
+// the player scrolls the artifact selection; P_InvScroll stamps hinv_show_until.
+int hinv_show_until = 0;
+
+static boolean ST_HInvActive (void)
+{
+    return plyr && plyr->invslot != arti_none && leveltime < hinv_show_until;
+}
+
+// Draw the 7-slot Heretic inventory bar (crispy DrawInventoryBar layout) over the
+// main-bar area.  Builds the compacted list of held, icon-having artifacts (the
+// DOOM overflow/ammo slots have no Heretic icon and are skipped), keeps the
+// selection on screen, and blinks the scroll gems when the list runs off an edge.
+static void ST_HereticInvBar (int wd)
+{
+    artitype_t	held[NUMARTIFACTS];
+    int		cnt [NUMARTIFACTS];
+    int		n = 0, sel = 0, first, i;
+    artitype_t	a;
+
+    for (a = (artitype_t)(arti_none + 1); a < NUMARTIFACTS; a = (artitype_t)(a + 1))
+	if (plyr->inventory[a] > 0 && ST_HArtiIconName (a))
+	{
+	    if (a == (artitype_t) plyr->invslot) sel = n;
+	    cnt[n]    = plyr->inventory[a];
+	    held[n++] = a;
+	}
+
+    if (h_invbar) V_DrawPatch (wd + 34, 160, 0, h_invbar);
+    if (n == 0) return;
+
+    // scroll window: keep the selection visible, centred where possible
+    first = (n <= 7) ? 0 : (sel <= 3 ? 0 : (sel >= n - 4 ? n - 7 : sel - 3));
+
+    for (i = 0; i < 7 && first + i < n; i++)
+    {
+	patch_t* ic = ST_HArtiIcon (held[first + i]);
+	if (ic) V_DrawPatch (wd + 50 + i*31, 160, 0, ic);
+	ST_HDrSmallNumber (cnt[first + i], wd + 69 + i*31, 182);
+    }
+    if (h_selectbox) V_DrawPatch (wd + 50 + (sel - first)*31, 189, 0, h_selectbox);
+    if (first != 0 && h_invgeml[0])
+	V_DrawPatch (wd + 38, 159, 0, (leveltime & 4) ? h_invgeml[1] : h_invgeml[0]);
+    if (n - first > 7 && h_invgemr[0])
+	V_DrawPatch (wd + 269, 159, 0, (leveltime & 4) ? h_invgemr[1] : h_invgemr[0]);
+}
+
+static void ST_HereticDrawer (void)
+{
+    int hp;
+    int wd = WIDESCREENDELTA;	// the bar is 320-wide -> centre it in widescreen (0 in 4:3)
+
+    if (!plyr) return;
+    ST_HereticLoad ();
+
+    // The 320-wide bar is centred (wd); in widescreen the full-height 3D view shows on
+    // both sides of it, matching the DOOM widescreen bar.
+    if (h_barback) V_DrawPatch (wd + 0,  158, 0, h_barback);	// full 42px bar bg (opaque)
+
+    if (ST_HInvActive ())
+    {
+	// Inventory bar replaces the stat frame while the player is browsing artifacts.
+	ST_HereticInvBar (wd);
+    }
+    else
+    {
+	if (h_statbar) V_DrawPatch (wd + 34, 160, 0, h_statbar);	// main-bar overlay frame (LIFEBAR/STATBAR)
+
+	// Health (green number)
+	ST_HDrINumber (plyr->health, wd + 61, 170);
+
+	// Ammo of the ready weapon
+	if (weaponinfo[plyr->readyweapon].ammo != am_noammo)
+	{
+	    if (h_blacksq) V_DrawPatch (wd + 108, 161, 0, h_blacksq);
+	    ST_HDrINumber (plyr->ammo[weaponinfo[plyr->readyweapon].ammo], wd + 109, 162);
+	}
+
+	// Armor
+	ST_HDrINumber (plyr->armorpoints, wd + 228, 170);
+
+	// Keys -- Heretic yellow/green/blue map onto DOOM yellow/red/blue card slots
+	// (green uses the "red" slot; see P_TouchHereticItem).
+	if (plyr->cards[it_yellowcard] && h_ykey) V_DrawPatch (wd + 153, 164, 0, h_ykey);
+	if (plyr->cards[it_redcard]    && h_gkey) V_DrawPatch (wd + 153, 172, 0, h_gkey);
+	if (plyr->cards[it_bluecard]   && h_bkey) V_DrawPatch (wd + 153, 180, 0, h_bkey);
+
+	// Selected-artifact box (crispy DrawMainBar): the ready artifact shows here
+	// persistently, so you always see what a "use" would spend even between browses.
+	if (plyr->invslot != arti_none && plyr->inventory[plyr->invslot] > 0)
+	{
+	    patch_t* ic = ST_HArtiIcon ((artitype_t) plyr->invslot);
+	    if (h_blacksq) V_DrawPatch (wd + 180, 161, 0, h_blacksq);
+	    if (ic)        V_DrawPatch (wd + 179, 160, 0, ic);
+	    ST_HDrSmallNumber (plyr->inventory[plyr->invslot], wd + 201, 182);
+	}
+    }
+
+    // Health chain + sliding life gem along the bottom
+    if (h_chainback) V_DrawPatch (wd + 0, 190, 0, h_chainback);
+    if (h_chain)     V_DrawPatch (wd + 0, 190, 0, h_chain);
+    if (h_lifegem)
+    {
+	hp = plyr->health; if (hp < 0) hp = 0; if (hp > 100) hp = 100;
+	V_DrawPatch (wd + 2 + (hp * 270) / 100, 190, 0, h_lifegem);	// slides right with health
+    }
+}
+
+// Heretic status-bar style 1: the full Heretic bar rendered then scaled to 50%
+// and centred along the bottom -- same snapshot/capture/restore/downscale trick
+// as the DOOM ST_DrawScaled, but over Heretic's 42px bar geometry.  The Heretic
+// bar is drawn in BASE coords (V_DrawPatch scales by hires), so a 4:3 bar spans
+// device rows [158..200)*hires and is centred with WIDESCREENDELTA in widescreen.
+void ST_HereticScaled (void)
+{
+    static byte* vsave = NULL; static int vcap  = 0;
+    static byte* bcap  = NULL; static int bccap = 0;
+    int hh    = 42 * hires;				// Heretic bar height (base 42)
+    int top   = SCREENHEIGHT - hh;			// = 158*hires
+    int bx    = WIDESCREENDELTA * hires;		// bar left edge (device)
+    int bw    = 320 * hires;				// bar is 320 wide (base)
+    int strip, dw, dh, dx, dy, x, y;
+
+    if (!plyr) return;
+    ST_doPaletteStuff ();				// keep damage/pickup palette flashes
+    if (bx < 0) bx = 0;
+    if (bx + bw > SCREENWIDTH) bw = SCREENWIDTH - bx;
+    strip = SCREENWIDTH * hh;
+    dw = bw/2; dh = hh/2;
+    dx = (SCREENWIDTH - dw)/2; dy = SCREENHEIGHT - dh;
+
+    if (vcap  < strip) { if (vsave) Z_Free(vsave); vsave = Z_Malloc(strip, PU_STATIC, 0); vcap  = strip; }
+    if (bccap < bw*hh) { if (bcap)  Z_Free(bcap);  bcap  = Z_Malloc(bw*hh, PU_STATIC, 0); bccap = bw*hh; }
+
+    memcpy (vsave, screens[0] + top*SCREENWIDTH, strip);	// 1) snapshot the view
+    ST_HereticDrawer ();					// 2) full bar -> screens[0]
+    for (y = 0; y < hh; y++)					// 3) capture the bar
+	memcpy (bcap + y*bw, screens[0] + (top+y)*SCREENWIDTH + bx, bw);
+    memcpy (screens[0] + top*SCREENWIDTH, vsave, strip);	// 4) put the view back
+    for (y = 0; y < dh; y++)					// 5) scale the bar -> 50%, centred
+    {
+	byte* d = screens[0] + (dy+y)*SCREENWIDTH + dx;
+	byte* s = bcap + (y*2)*bw;
+	for (x = 0; x < dw; x++) d[x] = s[x*2];
+    }
+}
+
+// Heretic status-bar style 2: minimal fullscreen HUD -- big Heretic IN numbers,
+// health bottom-left, ready-weapon ammo bottom-right, over the full view.
+void ST_HereticAltHUD (void)
+{
+    int wbase = SCREENWIDTH / hires;			// wide base width
+    int y     = BASE_HEIGHT - 13;			// IN glyphs are ~11px tall
+
+    if (!plyr) return;
+    ST_HereticLoad ();
+    ST_doPaletteStuff ();				// keep damage/pickup palette flashes
+
+    ST_HDrINumber (plyr->health, 4, y);			// health, bottom-left
+    if (weaponinfo[plyr->readyweapon].ammo != am_noammo)	// ammo, bottom-right (3-cell block = 27px)
+	ST_HDrINumber (plyr->ammo[weaponinfo[plyr->readyweapon].ammo], wbase - 4 - 27, y);
+}
+
+// ===========================================================================
+//  Strife status bar
+//  strife1.wad has its own bar art -- INVBACK (320x32 background) + INVFONG/INVFONY
+//  (6x5 green/yellow digit fonts) -- but none of the DOOM lumps.  Draw INVBACK along
+//  the bottom and overlay the two readouts in its side number boxes: health (green,
+//  left) and the ready weapon's ammo (yellow, right).  Straight to screen 0 at base
+//  (320x200) coords -- V_DrawPatch scales for hires -- like the Heretic bar.  The
+//  inventory row, keys and the accuracy targeter need Strife subsystems not wired in
+//  here yet and are omitted (the empty slots are part of the INVBACK art).
+// ===========================================================================
+static patch_t*	s_invback;	// INVBACK -- main bar body, drawn at (0,168)
+static patch_t*	s_invtop;	// INVTOP  -- top plate strip (health heart), at (0,160)
+static patch_t*	s_fong[10];	// INVFONG* -- green digits (health + ready ammo)
+static int	s_sb_loaded;
+
+static void ST_StrifeLoad (void)
+{
+    int i; char nm[9];
+    if (s_sb_loaded) return;
+    s_sb_loaded = 1;
+    s_invback = ST_HCache ("INVBACK");
+    s_invtop  = ST_HCache ("INVTOP");
+    for (i = 0; i < 10; i++) { sprintf (nm, "INVFONG%d", i); s_fong[i] = ST_HCache (nm); }
+}
+
+// Strife number: INVFON digits are 6px + 1px gap = 7px cells (strife-ve STlib_drawNum).
+// `xr` is the number's RIGHT boundary; digits fill leftward.  0 draws a single "0".
+static void ST_SDrNumber (int val, int xr, int y, patch_t** font)
+{
+    int x = xr;
+    if (val < 0)   val = 0;
+    if (val > 999) val = 999;
+    if (!val) { if (font[0]) V_DrawPatch (x - 7, y, 0, font[0]); return; }
+    while (val) { x -= 7; if (font[val % 10]) V_DrawPatch (x, y, 0, font[val % 10]); val /= 10; }
+}
+
+// Ported from strife-ve src/strife/st_stuff.c (ST_doRefresh + ST_DrawExternal): the
+// INVBACK body at (0,168) plus the INVTOP plate at (0,160), then health and the ready
+// weapon's ammo as GREEN (INVFONG) numbers right-aligned at Strife's own coords
+// (health x=79, ammo x=311, both y=162).  The inventory row, keys and accuracy targeter
+// need Strife subsystems not wired here yet and are left as the INVBACK art's empty
+// slots.  Centred with WIDESCREENDELTA in widescreen.
+static void ST_StrifeDrawer (void)
+{
+    int wd = WIDESCREENDELTA;
+
+    if (!plyr) return;
+    ST_StrifeLoad ();
+
+    if (s_invback) V_DrawPatch (wd + 0, 168, 0, s_invback);	// main bar body
+    if (s_invtop)  V_DrawPatch (wd + 0, 160, 0, s_invtop);	// top plate (holds the health heart)
+
+    ST_SDrNumber (plyr->health, wd + 79, 162, s_fong);		// health -- green
+
+    if (weaponinfo[plyr->readyweapon].ammo != am_noammo)	// ready weapon ammo -- green
+	ST_SDrNumber (plyr->ammo[weaponinfo[plyr->readyweapon].ammo], wd + 311, 162, s_fong);
+}
+
+// ===========================================================================
+//  Hexen status bar
+//
+//  Same deal as the Heretic bar above: hexen.wad has no DOOM status-bar art, so
+//  the DOOM bar renders black + "!".  Hexen's own bar IS present (H2BAR frame,
+//  STATBAR overlay, IN*/INRED* numbers, SMALLIN* small digits, the CHAIN +
+//  LIFEGEM health slider, LFEDGE/RTEDGE caps) -- draw that instead.  Layout is
+//  crispy-doom hexen/sb_bar.c DrawMainBar; drawn straight to screen 0 in base
+//  (320x200) coords, so it needs none of the DOOM screens[4]/ST_HEIGHT compositing.
+//
+//  Hexen's own player fields do not exist here (this engine runs Hexen CONTENT
+//  inside DOOM's playsim -- no mana pair, no per-class armour classes), so the two
+//  mana slots show the ready weapon's DOOM ammo and the armour readout shows
+//  armorpoints directly rather than Hexen's fixed-point /5.  Same compromise the
+//  Heretic bar makes, and it keeps the bar honest about what the playsim has.
+//  The artifact/inventory row and the class-specific weapon pieces are omitted.
+// ===========================================================================
+
+static patch_t*	x_h2bar;
+static patch_t*	x_statbar;
+static patch_t*	x_chain;
+static patch_t*	x_lifegem;
+static patch_t*	x_lfedge;
+static patch_t*	x_rtedge;
+static patch_t*	x_armcls;
+static patch_t*	x_manacls;
+static patch_t*	x_manabrt[2];
+static patch_t*	x_manadim[2];
+static patch_t*	x_inum[10];
+static patch_t*	x_rnum[10];		// INRED* -- health below 25
+static patch_t*	x_smnum[10];
+static int	x_sb_loaded = 0;
+
+static void ST_HexenLoad (void)
+{
+    int i; char nm[9];
+    if (x_sb_loaded) return;
+    x_sb_loaded = 1;
+    x_h2bar   = ST_HCache ("H2BAR");
+    x_statbar = ST_HCache ("STATBAR");
+    x_chain   = ST_HCache ("CHAIN");
+    x_lifegem = ST_HCache ("LIFEGEM");
+    x_lfedge  = ST_HCache ("LFEDGE");
+    x_rtedge  = ST_HCache ("RTEDGE");
+    x_armcls  = ST_HCache ("ARMCLS");
+    x_manacls = ST_HCache ("MANACLS");
+    x_manabrt[0] = ST_HCache ("MANABRT1"); x_manabrt[1] = ST_HCache ("MANABRT2");
+    x_manadim[0] = ST_HCache ("MANADIM1"); x_manadim[1] = ST_HCache ("MANADIM2");
+    for (i = 0; i < 10; i++) { sprintf (nm, "IN%d", i);      x_inum[i]  = ST_HCache (nm); }
+    for (i = 0; i < 10; i++) { sprintf (nm, "INRED%d", i);   x_rnum[i]  = ST_HCache (nm); }
+    for (i = 0; i < 10; i++) { sprintf (nm, "SMALLIN%d", i); x_smnum[i] = ST_HCache (nm); }
+}
+
+// crispy DrINumber: right-aligned 3-digit run, 8px pitch.  `set` picks the green
+// (IN*) or red (INRED*) digits -- Hexen turns the health readout red below 25.
+static void ST_XDrINumber (int val, int x, int y, patch_t** set)
+{
+    int oldval = val;
+    if (val < 0)   val = 0;
+    if (val > 999) val = 999;
+    if (val > 99 && set[val/100])                  V_DrawPatch (x,      y, 0, set[val/100]);
+    val %= 100;
+    if ((val > 9 || oldval > 99) && set[val/10])   V_DrawPatch (x + 8,  y, 0, set[val/10]);
+    val %= 10;
+    if (set[val])                                  V_DrawPatch (x + 16, y, 0, set[val]);
+}
+
+static void ST_XDrSmallNumber (int val, int x, int y)
+{
+    if (val < 0) val = 0;
+    if (val > 999) val = 999;
+    if (val > 99 && x_smnum[val/100]) V_DrawPatch (x,     y, 0, x_smnum[val/100]);
+    if (val > 9  && x_smnum[(val/10)%10]) V_DrawPatch (x + 4, y, 0, x_smnum[(val/10)%10]);
+    if (x_smnum[val%10])              V_DrawPatch (x + 8, y, 0, x_smnum[val%10]);
+}
+
+static void ST_HexenDrawer (void)
+{
+    int hp, ammo = 0, i;
+    int wd = WIDESCREENDELTA;	// 320-wide bar centred in widescreen (0 in 4:3)
+
+    if (!plyr) return;
+    ST_HexenLoad ();
+
+    if (x_h2bar)   V_DrawPatch (wd + 0,  134, 0, x_h2bar);	// full bar frame
+    if (x_statbar) V_DrawPatch (wd + 38, 162, 0, x_statbar);	// stat overlay
+
+    // Health -- red digits below 25, exactly like Hexen.
+    hp = plyr->health;
+    if (x_armcls) V_DrawPatch (wd + 41, 178, 0, x_armcls);	// clear the well first
+    ST_XDrINumber (hp, wd + 40, 176, (hp >= 25) ? x_inum : x_rnum);
+
+    // "Mana": this playsim has no mana pair, so both wells show the ready weapon's
+    // DOOM ammo -- lit when there is some, dim when empty (Hexen's MANABRT/MANADIM).
+    if (weaponinfo[plyr->readyweapon].ammo != am_noammo)
+	ammo = plyr->ammo[weaponinfo[plyr->readyweapon].ammo];
+    for (i = 0; i < 2; i++)
+    {
+	patch_t* icon = ammo ? x_manabrt[i] : x_manadim[i];
+	int      ix   = i ? 110 : 77;
+	if (x_manacls) V_DrawPatch (wd + ix, 178, 0, x_manacls);
+	if (icon)      V_DrawPatch (wd + ix, 164, 0, icon);
+	ST_XDrSmallNumber (ammo, wd + ix + 2, 181);
+    }
+
+    // Armour
+    if (x_armcls) V_DrawPatch (wd + 255, 178, 0, x_armcls);
+    ST_XDrINumber (plyr->armorpoints, wd + 250, 176, x_inum);
+
+    // Health chain: the gem slides along it, capped by the two edge pieces.
+    hp = plyr->health; if (hp < 0) hp = 0; if (hp > 100) hp = 100;
+    if (x_chain)   V_DrawPatch (wd + 28 + (((hp * 196) / 100) % 9), 193, 0, x_chain);
+    if (x_lifegem) V_DrawPatch (wd + 7 + ((hp * 11) / 5), 193, 0, x_lifegem);
+    if (x_lfedge)  V_DrawPatch (wd + 0,   193, 0, x_lfedge);
+    if (x_rtedge)  V_DrawPatch (wd + 277, 193, 0, x_rtedge);
+}
+
+void ST_Drawer (boolean fullscreen, boolean refresh)
+{
+
+    st_statusbaron = (!fullscreen) || automapactive;
+    st_firsttime = st_firsttime || refresh;
+
+    // Do red-/gold-shifts from damage/items
+    ST_doPaletteStuff();
+
+    // Heretic: heretic.wad lacks the DOOM bar art -- draw Heretic's own bar
+    // (drawn every frame straight to screen 0; no diff-draw needed).
+    if (heretic_mode)
+    {
+	if (st_statusbaron)
+	    ST_HereticDrawer ();
+	return;
+    }
+
+    // Hexen: same story as Heretic -- hexen.wad has no DOOM bar art.
+    if (gametype == GT_HEXEN)
+    {
+	if (st_statusbaron)
+	    ST_HexenDrawer ();
+	return;
+    }
+
+    // Strife: draw its own bar (INVBACK + INVFON* numbers), like Heretic.
+    if (strife_mode)
+    {
+	if (st_statusbaron)
+	    ST_StrifeDrawer ();
+	return;
+    }
+
+    // ID24 SBARDEF (opt-in via -sbardef): draw the data-driven bar instead.
+    if (ST_SBARDEF_Active ()) { ST_SBARDEF_Draw (fullscreen); return; }
+
+    // If just after ST_Start(), refresh all
+    if (st_firsttime) ST_doRefresh();
+    // Otherwise, update as little as possible
+    else ST_diffDraw();
+
+}
+
+// Cache a status-bar patch by name.  Heretic and Strife have none of the DOOM
+// status-bar lumps (STTNUM*, STBAR, STF*, ...) and W_CacheLumpName would I_Error on
+// the first one -- which is where strife1.wad used to stop booting, at STTNUM0.
+// Substitute a patch the game is guaranteed to have (Heretic FONTA01, Strife
+// STCFN033) so the engine gets through ST_Init; neither game then draws the DOOM bar
+// (see ST_Drawer), so the substitute is never actually rendered.  DOOM behaviour is
+// unchanged -- the lump is always present there.
+static patch_t* ST_CachePatch (const char* name)
+{
+    if (W_CheckNumForName ((char*)name) < 0)
+    {
+	// Pick by what the loaded IWAD actually HAS, not by a per-game flag: every new
+	// game otherwise needs another `else if` here and a matching one in
+	// STlib_init, and missing either is a fatal W_GetNumForName at startup --
+	// which is how Hexen died first on STTNUM0 and then on STTMINUS.
+	if      (W_CheckNumForName ("FONTA01")  >= 0) name = "FONTA01";	 // Raven (Heretic/Hexen)
+	else if (W_CheckNumForName ("STCFN033") >= 0) name = "STCFN033"; // DOOM/Strife
+	else					      return NULL;	 // nothing usable
+    }
+    return (patch_t *) W_CacheLumpName ((char*)name, PU_STATIC);
+}
+
+// ---------------------------------------------------------------------------
+// Alternative status-bar styles (Options -> Video -> Status Bar): 0 = vanilla,
+// 1 = the vanilla bar scaled to 50% centred at the bottom, 2 = a minimal
+// fullscreen HUD (health bottom-left + ammo bottom-right).  Styles 1/2 overlay a
+// full-height view (forced in R_ExecuteSetViewSize when this is non-zero).
+int statusbar_style = 0;
+
+// Accessors for the ID24 SBARDEF renderer (files/st_sbardef.c): the current face
+// patch and the player's face-background (NULL in single player).
+patch_t* ST_SBFace (void)     { return faces[st_faceindex]; }
+patch_t* ST_SBFaceBack (void) { return faceback; }
+
+// Draw num with the big "tall" font, left edge at (x,y); returns x past the digits.
+static int ST_TallNum (int x, int y, int num)
+{
+    int  w = ST_TALLNUMWIDTH;
+    char buf[12];
+    int  i, n;
+    if (num < 0) num = 0;
+    n = sprintf (buf, "%d", num);
+    for (i = 0; i < n; i++) { V_DrawPatch (x, y, FG, tallnum[buf[i]-'0']); x += w; }
+    return x;
+}
+
+// Style 1: render the full vanilla bar, then nearest-neighbour scale it to 50%
+// centred along the bottom, keeping the full-height view behind its margins.
+void ST_DrawScaled (void)
+{
+    static byte* vsave = NULL; static int vcap  = 0;
+    static byte* bcap  = NULL; static int bccap = 0;
+    int hh    = ST_HEIGHT * hires;
+    int top   = SCREENHEIGHT - hh;
+    int bx    = ST_X * hires;
+    int bw    = ST_WIDTH * hires;
+    int strip = SCREENWIDTH * hh;
+    int dw, dh, dx, dy, x, y;
+
+    if (bx < 0) bx = 0;
+    if (bx + bw > SCREENWIDTH) bw = SCREENWIDTH - bx;
+    dw = bw/2; dh = hh/2;
+    dx = (SCREENWIDTH - dw)/2; dy = SCREENHEIGHT - dh;
+
+    if (vcap  < strip) { if (vsave) Z_Free(vsave); vsave = Z_Malloc(strip, PU_STATIC, 0); vcap  = strip; }
+    if (bccap < bw*hh) { if (bcap)  Z_Free(bcap);  bcap  = Z_Malloc(bw*hh, PU_STATIC, 0); bccap = bw*hh; }
+
+    memcpy (vsave, screens[0] + top*SCREENWIDTH, strip);	// 1) snapshot the view
+    ST_doPaletteStuff ();
+    // 2) full bar -> screens[0].  When the ID24 data-driven bar is active (Legacy of
+    // Rust), draw THAT -- the classic ST_doRefresh lays vanilla widgets over LoR's own
+    // STBAR lump at the wrong positions (looked like a broken/"deathmatch" bar in the
+    // Small style).  SBARDEF draws to screen 0 at the bar Y, which is what we capture.
+    if (ST_SBARDEF_Active ())
+	ST_SBARDEF_Draw (false);				// classic (non-fullscreen) bar
+    else
+	ST_doRefresh ();
+    for (y = 0; y < hh; y++)					// 3) capture the bar
+	memcpy (bcap + y*bw, screens[0] + (top+y)*SCREENWIDTH + bx, bw);
+    memcpy (screens[0] + top*SCREENWIDTH, vsave, strip);	// 4) put the view back
+    for (y = 0; y < dh; y++)					// 5) scale the bar -> 50%, centred
+    {
+	byte* d = screens[0] + (dy+y)*SCREENWIDTH + dx;
+	byte* s = bcap + (y*2)*bw;
+	for (x = 0; x < dw; x++) d[x] = s[x*2];
+    }
+}
+
+// Style 2: minimal fullscreen HUD -- big health bottom-left, ready-weapon ammo
+// bottom-right, over the full view (no status-bar graphic).
+void ST_DrawAltHUD (void)
+{
+    player_t* plyr  = &players[consoleplayer];
+    int       wbase = SCREENWIDTH / hires;		// wide base width
+    int       w     = ST_TALLNUMWIDTH;
+    int       y     = BASE_HEIGHT - 1 - tallnum[0]->height;
+    int       xx;
+
+    ST_doPaletteStuff ();				// keep damage/pickup palette flashes
+
+    xx = ST_TallNum (2, y, plyr->health);		// health, bottom-left
+    V_DrawPatch (xx, y, FG, tallpercent);
+
+    if (weaponinfo[plyr->readyweapon].ammo != am_noammo)	// ammo, bottom-right
+    {
+	int  ammo = plyr->ammo[weaponinfo[plyr->readyweapon].ammo];
+	char buf[12];
+	int  n = sprintf (buf, "%d", ammo < 0 ? 0 : ammo);
+	ST_TallNum (wbase - 2 - n*w, y, ammo);
+    }
+}
+
+void ST_loadGraphics(void)
+{
+
+    int		i;
+    int		j;
+    int		facenum;
+
+    char	namebuf[9];
+
+    // Load the numbers, tall and short
+    for (i=0;i<10;i++)
+    {
+	sprintf(namebuf, "STTNUM%d", i);
+	tallnum[i] = ST_CachePatch(namebuf);
+
+	sprintf(namebuf, "STYSNUM%d", i);
+	shortnum[i] = ST_CachePatch(namebuf);
+    }
+
+    // Load percent key.
+    //Note: why not load STMINUS here, too?
+    tallpercent = ST_CachePatch("STTPRCNT");
+
+    // key cards
+    for (i=0;i<NUMCARDS;i++)
+    {
+	sprintf(namebuf, "STKEYS%d", i);
+	keys[i] = ST_CachePatch(namebuf);
+    }
+
+    // arms background
+    armsbg = ST_CachePatch("STARMS");
+
+    // arms ownership widgets
+    for (i=0;i<6;i++)
+    {
+	sprintf(namebuf, "STGNUM%d", i+2);
+
+	// gray #
+	arms[i][0] = ST_CachePatch(namebuf);
+
+	// yellow #
+	arms[i][1] = shortnum[i+2];
+    }
+
+    // face backgrounds for different color players
+    sprintf(namebuf, "STFB%d", consoleplayer);
+    faceback = ST_CachePatch(namebuf);
+
+    // status bar background bits
+    sbar = ST_CachePatch("STBAR");
+
+    // face states
+    facenum = 0;
+    for (i=0;i<ST_NUMPAINFACES;i++)
+    {
+	for (j=0;j<ST_NUMSTRAIGHTFACES;j++)
+	{
+	    sprintf(namebuf, "STFST%d%d", i, j);
+	    faces[facenum++] = ST_CachePatch(namebuf);
+	}
+	sprintf(namebuf, "STFTR%d0", i);	// turn right
+	faces[facenum++] = ST_CachePatch(namebuf);
+	sprintf(namebuf, "STFTL%d0", i);	// turn left
+	faces[facenum++] = ST_CachePatch(namebuf);
+	sprintf(namebuf, "STFOUCH%d", i);	// ouch!
+	faces[facenum++] = ST_CachePatch(namebuf);
+	sprintf(namebuf, "STFEVL%d", i);	// evil grin ;)
+	faces[facenum++] = ST_CachePatch(namebuf);
+	sprintf(namebuf, "STFKILL%d", i);	// pissed off
+	faces[facenum++] = ST_CachePatch(namebuf);
+    }
+    faces[facenum++] = ST_CachePatch("STFGOD0");
+    faces[facenum++] = ST_CachePatch("STFDEAD0");
+
+}
+
+void ST_loadData(void)
+{
+    lu_palette = W_GetNumForName ("PLAYPAL");
+    ST_loadGraphics();
+}
+
+void ST_unloadGraphics(void)
+{
+
+    int i;
+
+    // unload the numbers, tall and short
+    for (i=0;i<10;i++)
+    {
+	Z_ChangeTag(tallnum[i], PU_CACHE);
+	Z_ChangeTag(shortnum[i], PU_CACHE);
+    }
+    // unload tall percent
+    Z_ChangeTag(tallpercent, PU_CACHE); 
+
+    // unload arms background
+    Z_ChangeTag(armsbg, PU_CACHE); 
+
+    // unload gray #'s
+    for (i=0;i<6;i++)
+	Z_ChangeTag(arms[i][0], PU_CACHE);
+    
+    // unload the key cards
+    for (i=0;i<NUMCARDS;i++)
+	Z_ChangeTag(keys[i], PU_CACHE);
+
+    Z_ChangeTag(sbar, PU_CACHE);
+    Z_ChangeTag(faceback, PU_CACHE);
+
+    for (i=0;i<ST_NUMFACES;i++)
+	Z_ChangeTag(faces[i], PU_CACHE);
+
+    // Note: nobody ain't seen no unloading
+    //   of stminus yet. Dude.
+    
+
+}
+
+void ST_unloadData(void)
+{
+    ST_unloadGraphics();
+}
+
+void ST_initData(void)
+{
+
+    int		i;
+
+    st_firsttime = true;
+    plyr = &players[consoleplayer];
+
+    st_clock = 0;
+    st_chatstate = StartChatState;
+    st_gamestate = FirstPersonState;
+
+    st_statusbaron = true;
+    st_oldchat = st_chat = false;
+    st_cursoron = false;
+
+    st_faceindex = 0;
+    st_palette = -1;
+
+    st_oldhealth = -1;
+
+    for (i=0;i<NUMWEAPONS;i++)
+	oldweaponsowned[i] = plyr->weaponowned[i];
+
+    for (i=0;i<3;i++)
+	keyboxes[i] = -1;
+
+    STlib_init();
+
+}
+
+
+
+void ST_createWidgets(void)
+{
+
+    int i;
+
+    // ready weapon ammo
+    STlib_initNum(&w_ready,
+		  ST_AMMOX,
+		  ST_AMMOY,
+		  tallnum,
+		  &plyr->ammo[weaponinfo[plyr->readyweapon].ammo],
+		  &st_statusbaron,
+		  ST_AMMOWIDTH );
+
+    // the last weapon type
+    w_ready.data = plyr->readyweapon; 
+
+    // health percentage
+    STlib_initPercent(&w_health,
+		      ST_HEALTHX,
+		      ST_HEALTHY,
+		      tallnum,
+		      &plyr->health,
+		      &st_statusbaron,
+		      tallpercent);
+
+    // arms background
+    STlib_initBinIcon(&w_armsbg,
+		      ST_ARMSBGX,
+		      ST_ARMSBGY,
+		      armsbg,
+		      &st_notdeathmatch,
+		      &st_statusbaron);
+
+    // weapons owned
+    for(i=0;i<6;i++)
+    {
+	STlib_initMultIcon(&w_arms[i],
+			   ST_ARMSX+(i%3)*ST_ARMSXSPACE,
+			   ST_ARMSY+(i/3)*ST_ARMSYSPACE,
+			   arms[i], (int *) &plyr->weaponowned[i+1],
+			   &st_armson);
+    }
+
+    // frags sum
+    STlib_initNum(&w_frags,
+		  ST_FRAGSX,
+		  ST_FRAGSY,
+		  tallnum,
+		  &st_fragscount,
+		  &st_fragson,
+		  ST_FRAGSWIDTH);
+
+    // faces
+    STlib_initMultIcon(&w_faces,
+		       ST_FACESX,
+		       ST_FACESY,
+		       faces,
+		       &st_faceindex,
+		       &st_statusbaron);
+
+    // armor percentage - should be colored later
+    STlib_initPercent(&w_armor,
+		      ST_ARMORX,
+		      ST_ARMORY,
+		      tallnum,
+		      &plyr->armorpoints,
+		      &st_statusbaron, tallpercent);
+
+    // keyboxes 0-2
+    STlib_initMultIcon(&w_keyboxes[0],
+		       ST_KEY0X,
+		       ST_KEY0Y,
+		       keys,
+		       &keyboxes[0],
+		       &st_statusbaron);
+    
+    STlib_initMultIcon(&w_keyboxes[1],
+		       ST_KEY1X,
+		       ST_KEY1Y,
+		       keys,
+		       &keyboxes[1],
+		       &st_statusbaron);
+
+    STlib_initMultIcon(&w_keyboxes[2],
+		       ST_KEY2X,
+		       ST_KEY2Y,
+		       keys,
+		       &keyboxes[2],
+		       &st_statusbaron);
+
+    // ammo count (all four kinds)
+    STlib_initNum(&w_ammo[0],
+		  ST_AMMO0X,
+		  ST_AMMO0Y,
+		  shortnum,
+		  &plyr->ammo[0],
+		  &st_statusbaron,
+		  ST_AMMO0WIDTH);
+
+    STlib_initNum(&w_ammo[1],
+		  ST_AMMO1X,
+		  ST_AMMO1Y,
+		  shortnum,
+		  &plyr->ammo[1],
+		  &st_statusbaron,
+		  ST_AMMO1WIDTH);
+
+    STlib_initNum(&w_ammo[2],
+		  ST_AMMO2X,
+		  ST_AMMO2Y,
+		  shortnum,
+		  &plyr->ammo[2],
+		  &st_statusbaron,
+		  ST_AMMO2WIDTH);
+    
+    STlib_initNum(&w_ammo[3],
+		  ST_AMMO3X,
+		  ST_AMMO3Y,
+		  shortnum,
+		  &plyr->ammo[3],
+		  &st_statusbaron,
+		  ST_AMMO3WIDTH);
+
+    // max ammo count (all four kinds)
+    STlib_initNum(&w_maxammo[0],
+		  ST_MAXAMMO0X,
+		  ST_MAXAMMO0Y,
+		  shortnum,
+		  &plyr->maxammo[0],
+		  &st_statusbaron,
+		  ST_MAXAMMO0WIDTH);
+
+    STlib_initNum(&w_maxammo[1],
+		  ST_MAXAMMO1X,
+		  ST_MAXAMMO1Y,
+		  shortnum,
+		  &plyr->maxammo[1],
+		  &st_statusbaron,
+		  ST_MAXAMMO1WIDTH);
+
+    STlib_initNum(&w_maxammo[2],
+		  ST_MAXAMMO2X,
+		  ST_MAXAMMO2Y,
+		  shortnum,
+		  &plyr->maxammo[2],
+		  &st_statusbaron,
+		  ST_MAXAMMO2WIDTH);
+    
+    STlib_initNum(&w_maxammo[3],
+		  ST_MAXAMMO3X,
+		  ST_MAXAMMO3Y,
+		  shortnum,
+		  &plyr->maxammo[3],
+		  &st_statusbaron,
+		  ST_MAXAMMO3WIDTH);
+
+}
+
+static boolean	st_stopped = true;
+
+
+void ST_Start (void)
+{
+
+    if (!st_stopped)
+	ST_Stop();
+
+    ST_initData();
+    ST_createWidgets();
+    st_stopped = false;
+
+    hinv_show_until = 0;	// (H) don't carry a stale inventory-bar timer across levels
+					// (leveltime resets to 0 each level; see ST_HInvActive)
+}
+
+void ST_Stop (void)
+{
+    if (st_stopped)
+	return;
+
+    I_SetPalette (W_CacheLumpNum (lu_palette, PU_CACHE));
+
+    st_stopped = true;
+}
+
+void ST_Init (void)
+{
+    veryfirsttime = 0;
+    ST_loadData();
+    ST_SBARDEF_Init ();		// ID24: parse the SBARDEF lump (patches are loaded now)
+    // Width is the full SCREENWIDTH (the V_CopyRect row stride); height is the
+    // status bar height scaled up by hires.
+    screens[4] = (byte *) Z_Malloc(SCREENWIDTH*ST_HEIGHT*hires, PU_STATIC, 0);
+}
+
+//
+// ST_SetRes
+// Reallocate the status-bar background buffer for the current resolution.
+// Called from V_SetRes when the internal resolution changes.
+//
+void ST_SetRes (void)
+{
+    if (screens[4])
+	Z_Free (screens[4]);
+    screens[4] = (byte *) Z_Malloc(SCREENWIDTH*ST_HEIGHT*hires, PU_STATIC, 0);
+    // The freshly (re)allocated background buffer holds garbage; force a full
+    // status-bar redraw next frame, else it bleeds through after a resolution
+    // change (see the corruption screenshot).
+    st_firsttime = true;
+    // (mod) The widget X positions bake in WIDESCREENDELTA (which changes with the aspect ratio)
+    // and are cached by ST_createWidgets at level start -- so after a runtime resolution/aspect
+    // change they sit at stale offsets and look mis-aligned.  Re-create them so they snap to the
+    // new layout; a redraw alone (st_firsttime) just repaints them at the stale positions.
+    // Guard on !st_stopped: the bar is only "started" inside a level (ST_Start), where plyr and
+    // the bar graphics are valid.  V_SetRes ALSO runs at startup before any level -- and gamestate
+    // defaults to 0 (== GS_LEVEL) there, so testing gamestate wrongly fired ST_createWidgets and
+    // crashed on the unspawned player.  st_stopped is true until ST_Start, so this is safe.
+    if (!st_stopped)
+	ST_createWidgets();
+}

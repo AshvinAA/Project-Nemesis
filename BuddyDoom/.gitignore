@@ -1,0 +1,163 @@
+# --- Build artifacts (MSVC + autotools/gcc) ---
+*.o
+*.obj
+*.res
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.lo
+.deps/
+.libs/
+build.log
+
+# --- autotools generated output (the *.in / configure templates stay) ---
+files/Makefile
+config.cache
+config.log
+config.status
+
+# --- Game data & runtime-generated files ---
+# IWADs are copyrighted id Software data -- bring your own, never commit them.
+*.wad
+*.WAD
+# Exception: run/buddydoom.wad is OUR voice asset (pre-rendered OGG phrases in a
+# Doom PWAD), not a game IWAD.  It must be in the repo so the engine can
+# play the buddy voice offline without anyone re-running the ElevenLabs
+# baker.  Listed AFTER the general *.wad rule so it takes precedence.
+!run/ID0/buddydoom.wad
+# Exception: BOOMEDIT.WAD is TeamTNT's freely-distributable Boom demonstration
+# map (ships with the Boom source), kept as a Boom-compat test asset -- not
+# copyrighted id IWAD data.
+!run/ID0/BOOMEDIT.WAD
+# Exception: FRANK.wad is the "Frank N. Stein" BUDDYDEF buddy pack (BUDDYDEF lump,
+# FRAN* sprites incl. the HD set, DS* sounds) -- fork content, not id IWAD data.
+# It is the reference example for docs/BUDDY_MODDING.md, so it lives in the repo.
+!run/ID0/FRANK.wad
+# Exception: Fleshhound.wad -- same thing, a second BUDDYDEF buddy pack.
+!run/ID0/Fleshhound.wad
+# Exception: MBF21/DeHackEd test PWADs (kept for exercising the MBF21 + Boom port).
+!run/ID0/Crispy and Brutal.wad
+!run/ID0/Crispy and Brutal TruecolorPNG.wad
+# Exception: e1-arenas.wad is OUR Episode-1 arena map pack (also a released asset).
+!run/ID0/e1-arenas.wad
+doom.cfg
+.doomrc
+doomsav*.dsg
+*.log
+
+# --- Local scratch (screenshots, icon previews) ---
+*Datei-Explorer*.png
+icon_preview.png
+exe_icon_check.png
+
+# Throwaway scratch directory (test artifacts, downloaded zips, etc.)
+tmp/
+
+# --- Python (ollama_director.py / gpumon.py) ---
+__pycache__/
+*.pyc
+
+# --- Editor / OS noise ---
+*~
+*.swp
+.DS_Store
+Thumbs.db
+.vs/
+*.err
+
+# bare (extensionless) build outputs
+files/buddydoom
+files/doom
+# build.sh copies the binary here too
+run/buddydoom
+run/doom
+# SDL3 config tool binary (built by tools/build_config.sh, copied to run/)
+tools/buddydoom_config
+run/buddydoom_config
+# runtime config (written by the game / config app; user-specific).
+# NOTE: run/buddydoom.cfg.local IS tracked -- it's the shipped default/template config
+# (localhost, no SSH user/keys); only the live buddydoom.cfg is per-user and ignored.
+buddydoom.cfg
+run/buddydoom.cfg
+buddydoom2.cfg
+run/buddydoom2.cfg
+
+# local debug screenshots (not part of the repo; hero.png is the only tracked image)
+Bildschirmfoto_*.png
+stuck.png
+hand.png
+
+# runtime artifacts
+buddy_say.txt
+run/buddy_say.txt
+# regenerable ElevenLabs voice bake cache (don't delete -- avoids re-running paid TTS)
+.buddy_voice_cache/
+tools/buddydoom_config.exe
+run/buddydoom_config.exe
+tools/gpumon_sdl
+run/gpumon_sdl
+tools/gpumon_sdl.exe
+run/gpumon_sdl.exe
+
+# CMake build output
+/build/
+/build_cmake/
+build_cmake_build.log
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+tools/gpumon
+run/gpumon
+# native LLM director (built by tools/build_director.sh, copied to run/)
+tools/director
+run/director
+# SDL3 launcher (built by tools/build_launcher.sh, copied to run/)
+tools/launcher
+run/launcher
+# SDL3 asset extractor (built by tools/build_extractor.sh, copied to run/)
+tools/extractor
+run/extractor
+# SDL3 buddy editor (built by tools/build_mybuddy.sh, copied to run/)
+tools/mybuddy
+run/mybuddy
+
+# Claude Code session/config directory
+.claude/
+
+# --- Local scratch: dated screenshots + misc PNGs ---
+# (hero.png is the only tracked image; these are throwaway captures)
+2026-*.png
+hero_Launcher.png
+
+# --- run/ scratch & editor artifacts (per-user, not part of the repo) ---
+run/ID0/*.SGN
+run/ID0/*.TXT
+run/ID0/*.DAT
+run/ID0/*.rar
+run/ID0/*.pdf
+run/buddydoom.cfg.mini
+run/e1-arenas.dbs
+run/launcher.ini
+run/smk.txt
+# Buddy pathfinding dumps -- appended by the `navdbg` console command and by the
+# void rescue (p_ai_coop.c).  A per-session diagnostic log, not repo content.
+run/navdbg.txt
+
+# Doom Builder / map editor artifacts (settings, autosaves, backups)
+*.dbs
+*.wad.backup*
+*.wad.*.autosave*
+
+# Scratch area: work-in-progress sprite sheets, reference art, PK3s to look at
+# later.  Nothing in here is built or loaded by the game, and the PNGs run to
+# several MB each, so it stays out of the repo.
+tools/TODO/
+
+# Extracted Heretic Iron-Lich frames for bake_lichling.py (Raven assets -- do not redistribute)
+run/ID0/lich/
+# Corvus mugshot PNGs for the Heretic buddy HUD (Raven Heretic assets -- do not redistribute)
+run/ID0/FACE.FD/

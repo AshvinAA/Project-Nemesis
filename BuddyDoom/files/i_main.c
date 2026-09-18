@@ -1,0 +1,283 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	Main program, simply calls D_DoomMain high level loop.
+//
+//-----------------------------------------------------------------------------
+
+static const char
+rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
+
+
+#include <SDL3/SDL.h>
+#include <stdlib.h>	// exit()
+
+// Minimum SDL version.  Older SDL3 (<= 3.2.x) has an audio-stream regression where
+// SDL_GetAudioStreamQueued never drains to 0, which permanently latched the buddy
+// voice silent after one line (worked around in i_voice.c, but the runtime is only
+// validated against 3.4.12+).  Enforce it at BOTH build time (headers / dev package)
+// and run time (the loaded SDL3.dll) so an old DLL dropped next to the exe can't be used.
+#define BUDDYDOOM_SDL_MIN_MAJOR 3
+#define BUDDYDOOM_SDL_MIN_MINOR 4
+#define BUDDYDOOM_SDL_MIN_MICRO 12
+#if !SDL_VERSION_ATLEAST(BUDDYDOOM_SDL_MIN_MAJOR, BUDDYDOOM_SDL_MIN_MINOR, BUDDYDOOM_SDL_MIN_MICRO)
+#error "BuddyDoom requires SDL 3.4.12 or newer -- build against SDL3-devel-3.4.12+ (older SDL3 silences the buddy voice)."
+#endif
+
+// The build defines SDL_MAIN_HANDLED, so SDL does not hijack main(); we own the
+// console entry point (keeps stdout for the AI director logs) and just tell SDL
+// the main thread is ready before any SDL call.
+
+#include "doomdef.h"
+
+#include "m_argv.h"
+#include "d_main.h"
+
+// Crash diagnostics: on a fatal signal, dump a backtrace to stderr (the launcher
+// captures it to run/buddydoom_stderr.log) so a silent segfault during play -- e.g. a
+// bad sprite/sound from the doom2stuff overlay, or a playsim pointer bug -- names the
+// function that faulted instead of vanishing.  glibc/Linux only; async-signal-safe
+// (backtrace_symbols_fd, no malloc).
+#if defined(__linux__) && defined(__GLIBC__)
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+static void I_CrashHandler (int sig)
+{
+    void* bt[64];
+    int   n = backtrace (bt, 64);
+    fflush (NULL);				// flush buffered [INVIS]/debug logs before the backtrace
+    static const char hdr[] = "\n*** BuddyDoom CRASH (signal ";
+    char  num[4] = { (char)('0' + (sig/10)%10), (char)('0' + sig%10), ')', '\n' };
+    write (2, hdr, sizeof hdr - 1);
+    write (2, num, 4);
+    backtrace_symbols_fd (bt, n, 2);		// fd 2 = stderr
+    signal (sig, SIG_DFL);			// restore default + re-raise for a core dump
+    raise (sig);
+}
+static void I_InstallCrashHandler (void)
+{
+    // Run the handler on a dedicated ALTERNATE signal stack: a STACK-OVERFLOW (runaway
+    // recursion) faults with SIGSEGV but leaves no usable stack, so a normal handler can't
+    // run and the process dies silently with NO backtrace -- exactly what we saw on the
+    // invis-pickup crash.  SA_ONSTACK + sigaltstack lets the backtrace still print, naming
+    // the recursive function.
+    static char altstk[64*1024];
+    stack_t ss;
+    struct sigaction sa;
+    ss.ss_sp = altstk; ss.ss_size = sizeof altstk; ss.ss_flags = 0;
+    sigaltstack (&ss, NULL);
+    sa.sa_handler = I_CrashHandler;
+    sigemptyset (&sa.sa_mask);
+    sa.sa_flags = SA_ONSTACK;
+    sigaction (SIGSEGV, &sa, NULL);
+    sigaction (SIGABRT, &sa, NULL);
+    sigaction (SIGFPE,  &sa, NULL);
+    sigaction (SIGBUS,  &sa, NULL);
+}
+#elif defined(_WIN32)
+// Windows has no signals for hardware faults; a bad pointer raises a Structured
+// Exception instead.  A top-level SetUnhandledExceptionFilter catches the access
+// violation (etc.) that would otherwise just close the (now windowless) game with
+// no feedback -- it names the fault + address in an SDL dialog and writes it to
+// stderr (-> run/buddydoom_stderr.log via the launcher).  Best-effort: on a stack
+// overflow the handler runs on a nearly-exhausted stack, so keep it minimal
+// (static buffer, no allocation).
+#define WIN32_LEAN_AND_MEAN	// keep rpcndr.h/wtypesbase.h out: their boolean/BOOLEAN clash with doomtype.h (cf. i_net.c)
+#include <windows.h>
+#include <dbghelp.h>			// MiniDumpWriteDump (links dbghelp.lib)
+#include <stdio.h>
+// Write a post-mortem minidump next to the game (run/buddydoom_crash.dmp) that
+// Visual Studio / WinDbg can open to see the faulting stack + registers.
+// Returns 1 on success.  MiniDumpWithThreadInfo keeps it small but useful.
+static int I_WriteMinidump (EXCEPTION_POINTERS* ep)
+{
+    MINIDUMP_EXCEPTION_INFORMATION mei;
+    BOOL   ok;
+    HANDLE hf = CreateFileA ("buddydoom_crash.dmp", GENERIC_WRITE, 0, NULL,
+			     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hf == INVALID_HANDLE_VALUE)
+	return 0;
+    mei.ThreadId          = GetCurrentThreadId ();
+    mei.ExceptionPointers = ep;
+    mei.ClientPointers    = FALSE;
+    ok = MiniDumpWriteDump (GetCurrentProcess (), GetCurrentProcessId (), hf,
+			    (MINIDUMP_TYPE)(MiniDumpNormal | MiniDumpWithThreadInfo),
+			    ep ? &mei : NULL, NULL, NULL);
+    CloseHandle (hf);
+    return ok ? 1 : 0;
+}
+// Walk the faulting thread's stack and print a symbolised backtrace to stderr
+// (uses buddydoom.pdb next to the exe).  Invaluable for post-mortems without a
+// debugger -- names the exact function/line that crashed.
+static void I_PrintStack (EXCEPTION_POINTERS* ep)
+{
+    HANDLE	proc = GetCurrentProcess ();
+    HANDLE	thread = GetCurrentThread ();
+    CONTEXT	ctx;
+    STACKFRAME64 sf;
+    char	sbuf[sizeof(SYMBOL_INFO) + 256];
+    SYMBOL_INFO* sym = (SYMBOL_INFO*)sbuf;
+    DWORD	machine;
+    int		n;
+
+    if (!ep || !ep->ContextRecord)
+	return;
+    SymSetOptions (SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+    if (!SymInitialize (proc, NULL, TRUE))
+	{ fprintf (stderr, "  (SymInitialize failed, err=%lu)\n", GetLastError ()); fflush (stderr); return; }
+
+    // First, name the faulting instruction directly -- the single most useful line.
+    if (ep->ExceptionRecord)
+    {
+	DWORD64		fa = (DWORD64)(uintptr_t) ep->ExceptionRecord->ExceptionAddress, d = 0;
+	DWORD		ld = 0;
+	IMAGEHLP_LINE64	line; line.SizeOfStruct = sizeof line;
+	memset (sym, 0, sizeof sbuf);
+	sym->SizeOfStruct = sizeof(SYMBOL_INFO); sym->MaxNameLen = 255;
+	if (SymFromAddr (proc, fa, &d, sym))
+	{
+	    if (SymGetLineFromAddr64 (proc, fa, &ld, &line))
+		fprintf (stderr, "  fault in: %s  (%s:%lu)\n", sym->Name, line.FileName, line.LineNumber);
+	    else
+		fprintf (stderr, "  fault in: %s +0x%llx\n", sym->Name, (unsigned long long)d);
+	    fflush (stderr);
+	}
+    }
+    ctx = *ep->ContextRecord;
+    memset (&sf, 0, sizeof sf);
+#if defined(_M_X64) || defined(_M_AMD64)
+    machine = IMAGE_FILE_MACHINE_AMD64;
+    sf.AddrPC.Offset    = ctx.Rip;  sf.AddrPC.Mode    = AddrModeFlat;
+    sf.AddrFrame.Offset = ctx.Rbp;  sf.AddrFrame.Mode = AddrModeFlat;
+    sf.AddrStack.Offset = ctx.Rsp;  sf.AddrStack.Mode = AddrModeFlat;
+#elif defined(_M_IX86)
+    machine = IMAGE_FILE_MACHINE_I386;
+    sf.AddrPC.Offset    = ctx.Eip;  sf.AddrPC.Mode    = AddrModeFlat;
+    sf.AddrFrame.Offset = ctx.Ebp;  sf.AddrFrame.Mode = AddrModeFlat;
+    sf.AddrStack.Offset = ctx.Esp;  sf.AddrStack.Mode = AddrModeFlat;
+#else
+    machine = IMAGE_FILE_MACHINE_UNKNOWN;
+#endif
+    fprintf (stderr, "  backtrace (most recent first):\n");
+    for (n = 0; n < 24; n++)
+    {
+	DWORD64		disp = 0;
+	DWORD		ld = 0;
+	IMAGEHLP_LINE64	line;
+	if (!StackWalk64 (machine, proc, thread, &sf, &ctx, NULL,
+			  SymFunctionTableAccess64, SymGetModuleBase64, NULL)
+	    || !sf.AddrPC.Offset)
+	    break;
+	memset (sym, 0, sizeof sbuf);
+	sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+	sym->MaxNameLen   = 255;
+	line.SizeOfStruct = sizeof line;
+	if (SymFromAddr (proc, sf.AddrPC.Offset, &disp, sym))
+	{
+	    if (SymGetLineFromAddr64 (proc, sf.AddrPC.Offset, &ld, &line))
+		fprintf (stderr, "    #%02d %s  (%s:%lu)\n", n, sym->Name, line.FileName, line.LineNumber);
+	    else
+		fprintf (stderr, "    #%02d %s +0x%llx\n", n, sym->Name, (unsigned long long)disp);
+	}
+	else
+	    fprintf (stderr, "    #%02d 0x%08llx\n", n, (unsigned long long)sf.AddrPC.Offset);
+    }
+    SymCleanup (proc);
+    fflush (stderr);
+}
+
+static LONG WINAPI I_Win32CrashFilter (EXCEPTION_POINTERS* ep)
+{
+    static char	msg[640];			// static: don't lean on the trashed stack
+    DWORD	code = (ep && ep->ExceptionRecord) ? ep->ExceptionRecord->ExceptionCode    : 0;
+    void*	addr = (ep && ep->ExceptionRecord) ? ep->ExceptionRecord->ExceptionAddress : NULL;
+    const char*	name =
+	code == EXCEPTION_ACCESS_VIOLATION    ? "ACCESS_VIOLATION"       :
+	code == EXCEPTION_STACK_OVERFLOW      ? "STACK_OVERFLOW"         :
+	code == EXCEPTION_ILLEGAL_INSTRUCTION ? "ILLEGAL_INSTRUCTION"    :
+	code == EXCEPTION_INT_DIVIDE_BY_ZERO  ? "INT_DIVIDE_BY_ZERO"     :
+	code == EXCEPTION_PRIV_INSTRUCTION    ? "PRIVILEGED_INSTRUCTION" :
+	code == EXCEPTION_IN_PAGE_ERROR       ? "IN_PAGE_ERROR"          :
+					        "unhandled exception";
+    int		dumped = I_WriteMinidump (ep);	// write the .dmp before anything else can fail
+    snprintf (msg, sizeof msg,
+	      "BuddyDoom crashed.\n\n%s (0x%08lX) at address 0x%p.\n\n"
+	      "Saved in run\\:\n"
+	      "  - buddydoom_stderr.log  (console log)\n"
+	      "%s",
+	      name, (unsigned long)code, addr,
+	      dumped ? "  - buddydoom_crash.dmp   (open in Visual Studio / WinDbg)"
+		     : "  (minidump could not be written)");
+    fprintf (stderr, "\n*** BuddyDoom CRASH: %s (0x%08lX) at 0x%p; minidump %s ***\n",
+	     name, (unsigned long)code, addr, dumped ? "buddydoom_crash.dmp" : "FAILED");
+    fflush (stderr);
+    I_PrintStack (ep);				// symbolised backtrace to the log
+    // SDL's message box is the native Win32 dialog underneath; safe with parent = NULL
+    // even after a crash / with no game window.
+    SDL_ShowSimpleMessageBox (SDL_MESSAGEBOX_ERROR, "BuddyDoom crashed", msg, NULL);
+    return EXCEPTION_EXECUTE_HANDLER;		// let the process terminate
+}
+static void I_InstallCrashHandler (void)
+{
+    SetUnhandledExceptionFilter (I_Win32CrashFilter);
+}
+#else
+static void I_InstallCrashHandler (void) {}
+#endif
+
+// Refuse to run against an SDL3.dll older than the minimum (the compile-time #error
+// only covers the headers we built against; a stale DLL next to the exe is a runtime
+// thing).  SDL_GetVersion() needs no SDL_Init.  Reports via stderr AND a message box
+// (works with no window yet, same as the crash handler), then exits.
+static void I_RequireSDL (void)
+{
+    int have = SDL_GetVersion ();
+    int need = SDL_VERSIONNUM (BUDDYDOOM_SDL_MIN_MAJOR, BUDDYDOOM_SDL_MIN_MINOR, BUDDYDOOM_SDL_MIN_MICRO);
+    if (have >= need)
+	return;
+
+    char msg[256];
+    SDL_snprintf (msg, sizeof msg,
+	"BuddyDoom needs SDL %d.%d.%d or newer, but the loaded SDL3 library is %d.%d.%d.\n\n"
+	"Replace SDL3.dll (next to the game) with the bundled 3.4.12+ version.",
+	BUDDYDOOM_SDL_MIN_MAJOR, BUDDYDOOM_SDL_MIN_MINOR, BUDDYDOOM_SDL_MIN_MICRO,
+	SDL_VERSIONNUM_MAJOR (have), SDL_VERSIONNUM_MINOR (have), SDL_VERSIONNUM_MICRO (have));
+    fprintf (stderr, "\n*** %s\n", msg);
+    fflush (stderr);
+    SDL_ShowSimpleMessageBox (SDL_MESSAGEBOX_ERROR, "BuddyDoom: SDL too old", msg, NULL);
+    exit (1);
+}
+
+int
+main
+( int		argc,
+  char**	argv )
+{
+    SDL_SetMainReady();
+    I_RequireSDL ();		// bail early if the SDL3.dll is older than we support
+    I_InstallCrashHandler ();
+
+    myargc = argc;
+    myargv = argv;
+
+    D_DoomMain ();
+
+    return 0;
+}

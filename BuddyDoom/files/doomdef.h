@@ -1,0 +1,397 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// DESCRIPTION:
+//  Internally used data structures for virtually everything,
+//   key definitions, lots of other stuff.
+//
+//-----------------------------------------------------------------------------
+
+#ifndef __DOOMDEF__
+#define __DOOMDEF__
+
+#include <stdio.h>
+#include <string.h>
+
+//
+// Global parameters/defines.
+//
+// DOOM version
+enum { VERSION_NUM =  126 };	// auto-bumped: mobj_t grew (MBF strafecount, dropoffz, lastenemy)
+// AUTO-MANAGED.  Both build paths fingerprint the structs p_saveg.c memcpy's and
+// bump this when the fingerprint moves, so stale saves are cleanly REJECTED ("bad
+// version") instead of being read into a layout that no longer matches:
+//   Linux/macOS  build.sh
+//   Windows      tools\bump_version_win.ps1, called from build_all_win.bat
+// Each keeps its OWN fingerprint file (buddydoom_saveg.sig / _win.sig) because
+// Windows is LLP64 and Linux LP64 and the two disagree on the total by 8 bytes; a
+// shared file would make each platform read the other's value as a change and bump
+// forever.  So one struct change bumps once per platform you build on -- harmless,
+// since all this number has to be is different from what the old saves carry.
+// (Windows ran no check at all until now, which is how mobj_t.strafecount shipped
+// with the version untouched.)
+
+// Demo format version -- DECOUPLED from VERSION_NUM (which auto-bumps for savegame struct
+// changes).  The stock IWAD attract demos are version 109 (DOOM 1.9); keeping the demo
+// version pinned there lets them play instead of being rejected as "a different game
+// version" every time a struct change bumps VERSION_NUM.  Our own recorded demos use this
+// too, so they stay self-consistent.
+enum { DEMOVERSION = 109 };
+
+
+// Game mode handling - identify IWAD version
+//  to handle IWAD dependend animations etc.
+typedef enum
+{
+  shareware,	// DOOM 1 shareware, E1, M9
+  registered,	// DOOM 1 registered, E3, M27
+  commercial,	// DOOM 2 retail, E1 M34
+  // DOOM 2 german edition not handled
+  retail,	// DOOM 1 retail, E4, M36
+  indetermined	// Well, no IWAD found.
+  
+} GameMode_t;
+
+
+// Mission packs - might be useful for TC stuff?
+typedef enum
+{
+  doom,		// DOOM 1
+  doom2,	// DOOM 2
+  pack_tnt,	// TNT mission pack
+  pack_plut,	// Plutonia pack
+  none
+
+} GameMission_t;
+
+
+// Identify language to use, software localization.
+typedef enum
+{
+  english,
+  french,
+  german,
+  unknown
+
+} Language_t;
+
+
+// If rangecheck is undefined,
+// most parameter validation debugging code will not be compiled
+#define RANGECHECK
+
+// Do or do not use external soundserver.
+// The sndserver binary to be run separately
+//  has been introduced by Dave Taylor.
+// The integrated sound support is experimental,
+//  and unfinished. Default is synchronous.
+// Experimental asynchronous timer based is
+//  handled by SNDINTR. 
+#define SNDSERV  1
+//#define SNDINTR  1
+
+
+// This one switches between MIT SHM (no proper mouse)
+// and XFree86 DGA (mickey sampling). The original
+// linuxdoom used SHM, which is default.
+//#define X11_DGA		1
+
+
+//
+// For resize of screen, at start of game.
+// It will not work dynamically, see visplanes.
+//
+#define	BASE_WIDTH		320
+
+// It is educational but futile to change this
+//  scaling e.g. to 2. Drawing of status bar,
+//  menues etc. is tied to the scale implied
+//  by the graphics.
+#define	SCREEN_MUL		1
+#define	INV_ASPECT_RATIO	0.625 // 0.75, ideally
+
+#define	BASE_HEIGHT		200
+
+// Maximum internal resolution the static renderer tables are sized for.
+// (Allows up to 7x = 2240x1400 at 16:10, ~2488x1400 at 16:9 -- 1440p class.)
+#define	MAXWIDTH		2560
+#define	MAXHEIGHT		1440
+
+// The internal rendering resolution.  These are now runtime values
+// (BASE_WIDTH*hires x BASE_HEIGHT*hires) so they can be changed from the menu;
+// the 3D view / automap render natively at this size, while all 2D drawing is
+// authored in 320x200 (BASE) coordinates and scaled up by the V_ functions.
+extern int	SCREENWIDTH;
+extern int	SCREENHEIGHT;
+// Integer scale factor, SCREENHEIGHT/BASE_HEIGHT.  Range 2..7 (640x400 .. 2240x1400);
+// scale 1 / 320x200 was dropped, V_SetRes clamps to 2.
+extern int	hires;
+
+// Widescreen (Hor+); see doomdef.c.  In 16:10 modes NONWIDEWIDTH == SCREENWIDTH
+// and WIDESCREENDELTA == 0, so non-widescreen behaviour is unchanged.
+extern int	aspect;		// 0=4:3, 1=16:9, 2=16:10
+extern int	widescreen;	// derived: aspect==16:9
+extern int	NONWIDEWIDTH;
+extern int	WIDESCREENDELTA;
+
+extern int	scale_mode;	// 0=Nearest, 1=Linear
+extern int	vsync;		// 0=Off, 1=On
+extern int	integer_scale;	// 0=Letterbox, 1=Integer Scale
+extern int	render_backend;	// 0=Auto, 1=Vulkan, 2=OpenGL, 3=D3D12, 4=D3D11, 5=Metal, 6=Software
+
+
+
+
+// The maximum number of players, multiplayer/networking.
+#define MAXPLAYERS		4
+
+// State updates, number of tics / second.
+#define TICRATE		35
+
+// The current state of the game: whether we are
+// playing, gazing at the intermission screen,
+// the game final animation, or a demo. 
+typedef enum
+{
+    GS_LEVEL,
+    GS_INTERMISSION,
+    GS_FINALE,
+    GS_DEMOSCREEN
+} gamestate_t;
+
+//
+// Difficulty/skill settings/filters.
+//
+
+// Skill flags.
+#define	MTF_EASY		1
+#define	MTF_NORMAL		2
+#define	MTF_HARD		4
+
+// Deaf monsters/do not react to sound.
+#define	MTF_AMBUSH		8
+
+typedef enum
+{
+    sk_baby,
+    sk_easy,
+    sk_medium,
+    sk_hard,
+    sk_nightmare
+} skill_t;
+
+
+
+
+//
+// Key cards.
+//
+typedef enum
+{
+    it_bluecard,
+    it_yellowcard,
+    it_redcard,
+    it_blueskull,
+    it_yellowskull,
+    it_redskull,
+    
+    NUMCARDS
+    
+} card_t;
+
+
+
+// The defined weapons,
+//  including a marker indicating
+//  user has not changed weapon.
+typedef enum
+{
+    wp_fist,
+    wp_pistol,
+    wp_shotgun,
+    wp_chaingun,
+    wp_missile,
+    wp_plasma,
+    wp_bfg,
+    wp_chainsaw,
+    wp_supershotgun,
+    wp_incinerator,	// ID24 Legacy of Rust
+    wp_calamityblade,	// ID24 Legacy of Rust (Heatwave generator)
+
+    NUMWEAPONS,
+    
+    // No pending weapon change.
+    wp_nochange
+
+} weapontype_t;
+
+
+// Ammunition types defined.
+typedef enum
+{
+    am_clip,	// Pistol / chaingun ammo.
+    am_shell,	// Shotgun / double barreled shotgun.
+    am_cell,	// Plasma rifle, BFG.
+    am_misl,	// Missile launcher.
+    am_fuel,	// ID24 Legacy-of-Rust: Incinerator / Heatwave (Calamity Blade).
+    am_mace,	// (H) Heretic Firemace spheres -- 6th pool (heretic_mode only; the other
+		// 5 Heretic weapons reuse clip/shell/cell/misl/fuel).
+    NUMAMMO,
+    am_noammo	// Unlimited for chainsaw / fist.
+
+} ammotype_t;
+
+
+// Power up artifacts.
+typedef enum
+{
+    pw_invulnerability,
+    pw_strength,
+    pw_invisibility,
+    pw_ironfeet,
+    pw_allmap,
+    pw_infrared,
+    // MOD: generic timed flight power (Heretic Wings of Wrath grants it; any
+    // inventory can set powers[pw_flight] = FLIGHTTICS).  While > 0 the player
+    // floats (MF_NOGRAVITY) and climbs/descends by look pitch -- see p_user.c.
+    pw_flight,
+    NUMPOWERS
+
+} powertype_t;
+
+
+
+//
+// Power up durations,
+//  how many seconds till expiration,
+//  assuming TICRATE is 35 ticks/second.
+//
+typedef enum
+{
+    INVULNTICS	= (30*TICRATE),
+    INVISTICS	= (60*TICRATE),
+    INFRATICS	= (120*TICRATE),
+    IRONTICS	= (60*TICRATE),
+    FLIGHTTICS	= (60*TICRATE)		// MOD: Wings of Wrath flight (crispy: 60*35)
+
+} powerduration_t;
+
+
+
+
+//
+// DOOM keyboard definition.
+// This is the stuff configured by Setup.Exe.
+// Most key data are simple ascii (uppercased).
+//
+#define KEY_RIGHTARROW	0xae
+#define KEY_LEFTARROW	0xac
+#define KEY_UPARROW	0xad
+#define KEY_DOWNARROW	0xaf
+
+// Mouse wheel, posted as key events by i_video.c (default-bound to weapon cycle).
+#define KEY_MWHEELUP	0xb0
+#define KEY_MWHEELDOWN	0xb1
+#define KEY_MOUSE1	0xb2		// left mouse button   (bindable like a key)
+#define KEY_MOUSE2	0xb3		// right mouse button
+#define KEY_MOUSE3	0xb4		// middle mouse button
+#define KEY_ESCAPE	27
+#define KEY_ENTER	13
+#define KEY_TAB		9
+#define KEY_F1		(0x80+0x3b)
+#define KEY_F2		(0x80+0x3c)
+#define KEY_F3		(0x80+0x3d)
+#define KEY_F4		(0x80+0x3e)
+#define KEY_F5		(0x80+0x3f)
+#define KEY_F6		(0x80+0x40)
+#define KEY_F7		(0x80+0x41)
+#define KEY_F8		(0x80+0x42)
+#define KEY_F9		(0x80+0x43)
+#define KEY_F10		(0x80+0x44)
+#define KEY_F11		(0x80+0x57)
+#define KEY_F12		(0x80+0x58)
+
+#define KEY_BACKSPACE	127
+#define KEY_PAUSE	0xff
+
+#define KEY_EQUALS	0x3d
+#define KEY_MINUS	0x2d
+
+#define KEY_BACKQUOTE	0x60		// '`' -- toggles the Quake-style console
+
+#define KEY_RSHIFT	(0x80+0x36)
+#define KEY_RCTRL	(0x80+0x1d)
+#define KEY_RALT	(0x80+0x38)
+
+#define KEY_LALT	KEY_RALT
+
+
+
+// DOOM basic types (boolean),
+//  and max/min values.
+#include "doomtype.h"
+
+// Fixed point.
+//#include "m_fixed.h"
+
+// Endianess handling.
+//#include "m_swap.h"
+
+
+// Binary Angles, sine/cosine/atan lookups.
+//#include "tables.h"
+
+// Event type.
+//#include "d_event.h"
+
+// Game function, skills.
+//#include "g_game.h"
+
+// All external data is defined here.
+//#include "doomdata.h"
+
+// All important printed strings.
+// Language selection (message strings).
+//#include "dstrings.h"
+
+// Player is a special actor.
+//struct player_s;
+
+
+//#include "d_items.h"
+//#include "d_player.h"
+//#include "p_mobj.h"
+//#include "d_net.h"
+
+// PLAY
+//#include "p_tick.h"
+
+
+
+
+// Header, generated by sound utility.
+// The utility was written by Dave Taylor.
+//#include "sounds.h"
+
+
+
+
+#endif          // __DOOMDEF__
+//-----------------------------------------------------------------------------
+//
+// $Log:$
+//
+//-----------------------------------------------------------------------------

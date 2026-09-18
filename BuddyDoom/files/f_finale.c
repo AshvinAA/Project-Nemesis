@@ -1,0 +1,830 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	Game completion, final screen animation.
+//
+//-----------------------------------------------------------------------------
+
+
+static const char
+rcsid[] = "$Id: f_finale.c,v 1.5 1997/02/03 21:26:34 b1 Exp $";
+
+#include <ctype.h>
+
+// Functions.
+#include "m_swap.h"
+#include "i_system.h"
+#include "z_zone.h"
+#include "v_video.h"
+#include "w_wad.h"
+#include "s_sound.h"
+
+// Data.
+#include "dstrings.h"
+#include "sounds.h"
+
+#include "doomstat.h"
+#include "r_state.h"
+#include "g_game.h"		// secretexit
+#include "f_finale.h"		// castinfo_t / castorder (shared with d_deh.c)
+#include "u_mapinfo.h"		// UMAPINFO intertext / end-game finales
+
+// ?
+//#include "doomstat.h"
+//#include "r_local.h"
+//#include "f_finale.h"
+
+// Stage of animation:
+//  0 = text, 1 = art screen, 2 = character cast
+int		finalestage;
+
+int		finalecount;
+
+#define	TEXTSPEED	3
+#define	TEXTWAIT	250
+
+char*	e1text = E1TEXT;
+char*	e2text = E2TEXT;
+char*	e3text = E3TEXT;
+char*	e4text = E4TEXT;
+
+char*	c1text = C1TEXT;
+char*	c2text = C2TEXT;
+char*	c3text = C3TEXT;
+char*	c4text = C4TEXT;
+char*	c5text = C5TEXT;
+char*	c6text = C6TEXT;
+
+char*	p1text = P1TEXT;
+char*	p2text = P2TEXT;
+char*	p3text = P3TEXT;
+char*	p4text = P4TEXT;
+char*	p5text = P5TEXT;
+char*	p6text = P6TEXT;
+
+char*	t1text = T1TEXT;
+char*	t2text = T2TEXT;
+char*	t3text = T3TEXT;
+char*	t4text = T4TEXT;
+char*	t5text = T5TEXT;
+char*	t6text = T6TEXT;
+
+char*	finaletext;
+char*	finaleflat;
+
+// The finale background FLATS, as runtime strings so a BEX [STRINGS] entry (or a classic
+// Text substitution of the flat name) can replace them -- the standard BGFLAT* mnemonics.
+// They used to be literals assigned inline below, which is why a patch renaming e.g.
+// RROCK07 changed nothing.  BGCASTCALL is the cast-call backdrop (a patch, not a flat).
+char*	bgflatE1 = "FLOOR4_8";		// after E1
+char*	bgflatE2 = "SFLR6_1";		// after E2
+char*	bgflatE3 = "MFLR8_4";		// after E3
+char*	bgflatE4 = "MFLR8_3";		// after E4
+char*	bgflat06 = "SLIME16";		// after MAP06
+char*	bgflat11 = "RROCK14";		// after MAP11
+char*	bgflat20 = "RROCK07";		// after MAP20
+char*	bgflat30 = "RROCK17";		// after MAP30
+char*	bgflat15 = "RROCK13";		// after MAP15 (secret)
+char*	bgflat31 = "RROCK19";		// after MAP31 (secret)
+char*	bgcastcall = "BOSSBACK";	// cast call
+
+// UMAPINFO finale state (0 => a plain IWAD finale; see F_StartFinale).
+static int	um_endflags;		// U_END_* for this finale
+static boolean	um_nextlevel;		// after the text, continue to the next level
+static char	um_endpic[9];		// U_END_ART graphic
+
+extern boolean	secretexit;		// g_game.c: which exit was taken
+
+void	F_StartCast (void);
+void	F_CastTicker (void);
+boolean F_CastResponder (event_t *ev);
+void	F_CastDrawer (void);
+
+//
+// F_StartFinale
+//
+void F_StartFinale (void)
+{
+    gameaction = ga_nothing;
+    gamestate = GS_FINALE;
+    viewactive = false;
+    automapactive = false;
+
+    // UMAPINFO: intermission story text (intertext / intertextsecret) and/or the
+    // end-game triggers (endgame / endcast / endbunny / endpic) override the
+    // hardcoded IWAD finale below.
+    um_endflags = 0; um_nextlevel = false; um_endpic[0] = 0;
+    {
+	umap_t*	um = U_LookupMap (gameepisode, gamemap);
+	if (um)
+	{
+	    char*   txt   = secretexit
+			  ? (um->intertextsecret_clear ? NULL : um->intertextsecret)
+			  : (um->intertext_clear       ? NULL : um->intertext);
+	    boolean isend = (um->endflags & U_END_ANY) != 0;
+
+	    if (txt || isend || um->interbackdrop[0] || um->intermusic[0])
+	    {
+		um_endflags  = um->endflags;
+		um_nextlevel = !isend;			// intertext continues; endgame ends
+		if (um->endflags & U_END_ART) memcpy (um_endpic, um->endpic, 9);
+
+		if (um->intermusic[0]) S_ChangeMusicByName (um->intermusic, true);
+		else                   S_ChangeMusic (gamemode == commercial ? mus_read_m : mus_victor, true);
+
+		if (isend && !txt)			// pure end-game, no story text
+		{
+		    if (um->endflags & U_END_CAST) { F_StartCast (); return; }
+		    finalestage = 1; finalecount = 0;	// bunny / endpic / standard graphic
+		    return;
+		}
+
+		finaleflat = um->interbackdrop[0] ? um->interbackdrop : "FLOOR4_8";
+		finaletext = txt ? txt : " ";
+		finalestage = 0; finalecount = 0;
+		return;
+	    }
+	}
+    }
+
+    // Okay - IWAD dependend stuff.
+    // This has been changed severly, and
+    //  some stuff might have changed in the process.
+    switch ( gamemode )
+    {
+
+      // DOOM 1 - E1, E3 or E4, but each nine missions
+      case shareware:
+      case registered:
+      case retail:
+      {
+	S_ChangeMusic(mus_victor, true);
+	
+	switch (gameepisode)
+	{
+	  case 1:
+	    finaleflat = bgflatE1;
+	    finaletext = e1text;
+	    break;
+	  case 2:
+	    finaleflat = bgflatE2;
+	    finaletext = e2text;
+	    break;
+	  case 3:
+	    finaleflat = bgflatE3;
+	    finaletext = e3text;
+	    break;
+	  case 4:
+	    finaleflat = bgflatE4;
+	    finaletext = e4text;
+	    break;
+	  default:
+	    // Ouch.
+	    break;
+	}
+	break;
+      }
+      
+      // DOOM II and missions packs with E1, M34
+      case commercial:
+      {
+	  S_ChangeMusic(mus_read_m, true);
+
+	  switch (gamemap)
+	  {
+	    case 6:
+	      finaleflat = bgflat06;
+	      finaletext = c1text;
+	      break;
+	    case 11:
+	      finaleflat = bgflat11;
+	      finaletext = c2text;
+	      break;
+	    case 20:
+	      finaleflat = bgflat20;
+	      finaletext = c3text;
+	      break;
+	    case 30:
+	      finaleflat = bgflat30;
+	      finaletext = c4text;
+	      break;
+	    case 15:
+	      finaleflat = bgflat15;
+	      finaletext = c5text;
+	      break;
+	    case 31:
+	      finaleflat = bgflat31;
+	      finaletext = c6text;
+	      break;
+	    default:
+	      // Ouch.
+	      break;
+	  }
+	  break;
+      }	
+
+   
+      // Indeterminate.
+      default:
+	S_ChangeMusic(mus_read_m, true);
+	finaleflat = "F_SKY1"; // Not used anywhere else.
+	finaletext = c1text;  // FIXME - other text, music?
+	break;
+    }
+    
+    finalestage = 0;
+    finalecount = 0;
+	
+}
+
+
+
+boolean F_Responder (event_t *event)
+{
+    if (finalestage == 2)
+	return F_CastResponder (event);
+	
+    return false;
+}
+
+
+//
+// F_Ticker
+//
+void F_Ticker (void)
+{
+    int		i;
+    
+    // check for skipping
+    if ( (gamemode == commercial)
+      && ( finalecount > 50) )
+    {
+      // go on to the next level
+      for (i=0 ; i<MAXPLAYERS ; i++)
+	if (players[i].cmd.buttons)
+	  break;
+				
+      if (i < MAXPLAYERS)
+      {	
+	if (gamemap == 30)
+	  F_StartCast ();
+	else
+	  gameaction = ga_worlddone;
+      }
+    }
+    
+    // advance animation
+    finalecount++;
+
+    if (finalestage == 2)
+    {
+	F_CastTicker ();
+	return;
+    }
+
+    // UMAPINFO finale: once the story text has scrolled (or the player skips with a
+    // button), continue to the next level or roll the chosen end-game screen.
+    if (um_nextlevel || um_endflags)
+    {
+	boolean	textdone = finalecount > (int)strlen (finaletext)*TEXTSPEED + TEXTWAIT;
+	boolean	skip     = false;
+	if (finalecount > 50)
+	    for (i = 0; i < MAXPLAYERS; i++)
+		if (players[i].cmd.buttons) { skip = true; break; }
+
+	if (!finalestage && (textdone || skip))
+	{
+	    if (um_endflags & U_END_CAST) { F_StartCast (); return; }
+	    if (um_nextlevel)             { gameaction = ga_worlddone; return; }
+	    finalecount = 0; finalestage = 1; wipegamestate = -1;	// end graphic / bunny
+	    if (um_endflags & U_END_BUNNY) S_StartMusic (mus_bunny);
+	}
+	return;
+    }
+
+    if ( gamemode == commercial)
+	return;
+
+    if (!finalestage && finalecount>strlen (finaletext)*TEXTSPEED + TEXTWAIT)
+    {
+	finalecount = 0;
+	finalestage = 1;
+	wipegamestate = -1;		// force a wipe
+	if (gameepisode == 3)
+	    S_StartMusic (mus_bunny);
+    }
+}
+
+
+
+//
+// F_TextWrite
+//
+
+#include "hu_stuff.h"
+extern	patch_t *hu_font[HU_FONTSIZE];
+
+
+void F_TextWrite (void)
+{
+    byte*	src;
+    byte*	dest;
+    
+    int		x,y,w;
+    int		count;
+    char*	ch;
+    int		c;
+    int		cx;
+    int		cy;
+    
+    // erase the entire screen to a tiled background.  In heretic_mode the DOOM
+    // finale flat may be absent -> fall back to a black screen (the text still draws).
+    {
+	int fl = (finaleflat && finaleflat[0]) ? W_CheckNumForName (finaleflat) : -1;
+	if (fl < 0)
+	    memset (screens[0], 0, SCREENWIDTH*SCREENHEIGHT);
+	else
+	{
+	    src = W_CacheLumpNum (fl, PU_CACHE);
+	    dest = screens[0];
+	    for (y=0 ; y<SCREENHEIGHT ; y++)
+	    {
+		for (x=0 ; x<SCREENWIDTH/64 ; x++)
+		{
+		    memcpy (dest, src+((y&63)<<6), 64);
+		    dest += 64;
+		}
+		if (SCREENWIDTH&63)
+		{
+		    memcpy (dest, src+((y&63)<<6), SCREENWIDTH&63);
+		    dest += (SCREENWIDTH&63);
+		}
+	    }
+	}
+    }
+
+    V_MarkRect (0, 0, SCREENWIDTH, SCREENHEIGHT);
+    
+    // draw some of the text onto the screen
+    cx = 10;
+    cy = 10;
+    ch = finaletext;
+	
+    count = (finalecount - 10)/TEXTSPEED;
+    if (count < 0)
+	count = 0;
+    for ( ; count ; count-- )
+    {
+	c = *ch++;
+	if (!c)
+	    break;
+	if (c == '\n')
+	{
+	    cx = 10;
+	    cy += 11;
+	    continue;
+	}
+		
+	c = toupper(c) - HU_FONTSTART;
+	if (c < 0 || c> HU_FONTSIZE)
+	{
+	    cx += 4;
+	    continue;
+	}
+		
+	w = SHORT (hu_font[c]->width);
+	if (cx+w > SCREENWIDTH)
+	    break;
+	V_DrawPatch(cx, cy, 0, hu_font[c]);
+	cx+=w;
+    }
+	
+}
+
+//
+// Final DOOM 2 animation
+// Casting by id Software.
+//   in order of appearance
+//
+castinfo_t	castorder[] = {
+    {CC_ZOMBIE, MT_POSSESSED},
+    {CC_SHOTGUN, MT_SHOTGUY},
+    {CC_HEAVY, MT_CHAINGUY},
+    {CC_IMP, MT_TROOP},
+    {CC_DEMON, MT_SERGEANT},
+    {CC_LOST, MT_SKULL},
+    {CC_CACO, MT_HEAD},
+    {CC_HELL, MT_KNIGHT},
+    {CC_BARON, MT_BRUISER},
+    {CC_ARACH, MT_BABY},
+    {CC_PAIN, MT_PAIN},
+    {CC_REVEN, MT_UNDEAD},
+    {CC_MANCU, MT_FATSO},
+    {CC_ARCH, MT_VILE},
+    {CC_SPIDER, MT_SPIDER},
+    {CC_CYBER, MT_CYBORG},
+    {CC_HERO, MT_PLAYER},
+
+    {NULL,0}
+};
+
+int		castnum;
+int		casttics;
+state_t*	caststate;
+boolean		castdeath;
+int		castframes;
+int		castonmelee;
+boolean		castattacking;
+
+
+//
+// F_StartCast
+//
+extern	gamestate_t     wipegamestate;
+
+
+void F_StartCast (void)
+{
+    wipegamestate = -1;		// force a screen wipe
+    castnum = 0;
+    caststate = &states[mobjinfo[castorder[castnum].type].seestate];
+    casttics = caststate->tics;
+    castdeath = false;
+    finalestage = 2;	
+    castframes = 0;
+    castonmelee = 0;
+    castattacking = false;
+    S_ChangeMusic(mus_evil, true);
+}
+
+
+//
+// F_CastTicker
+//
+void F_CastTicker (void)
+{
+    int		st;
+    int		sfx;
+	
+    if (--casttics > 0)
+	return;			// not time to change state yet
+		
+    if (caststate->tics == -1 || caststate->nextstate == S_NULL)
+    {
+	// switch from deathstate to next monster
+	castnum++;
+	castdeath = false;
+	if (castorder[castnum].name == NULL)
+	    castnum = 0;
+	if (mobjinfo[castorder[castnum].type].seesound)
+	    S_StartSound (NULL, mobjinfo[castorder[castnum].type].seesound);
+	caststate = &states[mobjinfo[castorder[castnum].type].seestate];
+	castframes = 0;
+    }
+    else
+    {
+	// just advance to next state in animation
+	if (caststate == &states[S_PLAY_ATK1])
+	    goto stopattack;	// Oh, gross hack!
+	st = caststate->nextstate;
+	caststate = &states[st];
+	castframes++;
+	
+	// sound hacks....
+	switch (st)
+	{
+	  case S_PLAY_ATK1:	sfx = sfx_dshtgn; break;
+	  case S_POSS_ATK2:	sfx = sfx_pistol; break;
+	  case S_SPOS_ATK2:	sfx = sfx_shotgn; break;
+	  case S_VILE_ATK2:	sfx = sfx_vilatk; break;
+	  case S_SKEL_FIST2:	sfx = sfx_skeswg; break;
+	  case S_SKEL_FIST4:	sfx = sfx_skepch; break;
+	  case S_SKEL_MISS2:	sfx = sfx_skeatk; break;
+	  case S_FATT_ATK8:
+	  case S_FATT_ATK5:
+	  case S_FATT_ATK2:	sfx = sfx_firsht; break;
+	  case S_CPOS_ATK2:
+	  case S_CPOS_ATK3:
+	  case S_CPOS_ATK4:	sfx = sfx_shotgn; break;
+	  case S_TROO_ATK3:	sfx = sfx_claw; break;
+	  case S_SARG_ATK2:	sfx = sfx_sgtatk; break;
+	  case S_BOSS_ATK2:
+	  case S_BOS2_ATK2:
+	  case S_HEAD_ATK2:	sfx = sfx_firsht; break;
+	  case S_SKULL_ATK2:	sfx = sfx_sklatk; break;
+	  case S_SPID_ATK2:
+	  case S_SPID_ATK3:	sfx = sfx_shotgn; break;
+	  case S_BSPI_ATK2:	sfx = sfx_plasma; break;
+	  case S_CYBER_ATK2:
+	  case S_CYBER_ATK4:
+	  case S_CYBER_ATK6:	sfx = sfx_rlaunc; break;
+	  case S_PAIN_ATK3:	sfx = sfx_sklatk; break;
+	  default: sfx = 0; break;
+	}
+		
+	if (sfx)
+	    S_StartSound (NULL, sfx);
+    }
+	
+    if (castframes == 12)
+    {
+	// go into attack frame
+	castattacking = true;
+	if (castonmelee)
+	    caststate=&states[mobjinfo[castorder[castnum].type].meleestate];
+	else
+	    caststate=&states[mobjinfo[castorder[castnum].type].missilestate];
+	castonmelee ^= 1;
+	if (caststate == &states[S_NULL])
+	{
+	    if (castonmelee)
+		caststate=
+		    &states[mobjinfo[castorder[castnum].type].meleestate];
+	    else
+		caststate=
+		    &states[mobjinfo[castorder[castnum].type].missilestate];
+	}
+    }
+	
+    if (castattacking)
+    {
+	if (castframes == 24
+	    ||	caststate == &states[mobjinfo[castorder[castnum].type].seestate] )
+	{
+	  stopattack:
+	    castattacking = false;
+	    castframes = 0;
+	    caststate = &states[mobjinfo[castorder[castnum].type].seestate];
+	}
+    }
+	
+    casttics = caststate->tics;
+    if (casttics == -1)
+	casttics = 15;
+}
+
+
+//
+// F_CastResponder
+//
+
+boolean F_CastResponder (event_t* ev)
+{
+    if (ev->type != ev_keydown)
+	return false;
+		
+    if (castdeath)
+	return true;			// already in dying frames
+		
+    // go into death frame
+    castdeath = true;
+    caststate = &states[mobjinfo[castorder[castnum].type].deathstate];
+    casttics = caststate->tics;
+    castframes = 0;
+    castattacking = false;
+    if (mobjinfo[castorder[castnum].type].deathsound)
+	S_StartSound (NULL, mobjinfo[castorder[castnum].type].deathsound);
+	
+    return true;
+}
+
+
+void F_CastPrint (char* text)
+{
+    char*	ch;
+    int		c;
+    int		cx;
+    int		w;
+    int		width;
+    
+    // find width
+    ch = text;
+    width = 0;
+	
+    while (ch)
+    {
+	c = *ch++;
+	if (!c)
+	    break;
+	c = toupper(c) - HU_FONTSTART;
+	if (c < 0 || c> HU_FONTSIZE)
+	{
+	    width += 4;
+	    continue;
+	}
+		
+	w = SHORT (hu_font[c]->width);
+	width += w;
+    }
+    
+    // draw it
+    cx = 160-width/2;
+    ch = text;
+    while (ch)
+    {
+	c = *ch++;
+	if (!c)
+	    break;
+	c = toupper(c) - HU_FONTSTART;
+	if (c < 0 || c> HU_FONTSIZE)
+	{
+	    cx += 4;
+	    continue;
+	}
+		
+	w = SHORT (hu_font[c]->width);
+	V_DrawPatch(cx, 180, 0, hu_font[c]);
+	cx+=w;
+    }
+	
+}
+
+
+//
+// F_CastDrawer
+//
+void V_DrawPatchFlipped (int x, int y, int scrn, patch_t *patch);
+
+void F_CastDrawer (void)
+{
+    spritedef_t*	sprdef;
+    spriteframe_t*	sprframe;
+    int			lump;
+    boolean		flip;
+    patch_t*		patch;
+    
+    // erase the entire screen to a background (absent in Heretic -> black)
+    if (W_CheckNumForName (bgcastcall) >= 0)
+	V_DrawPatch (0,0,0, W_CacheLumpName (bgcastcall, PU_CACHE));
+    else
+	memset (screens[0], 0, SCREENWIDTH*SCREENHEIGHT);
+
+    F_CastPrint (castorder[castnum].name);
+    
+    // draw the current frame in the middle of the screen
+    sprdef = &sprites[caststate->sprite];
+    sprframe = &sprdef->spriteframes[ caststate->frame & FF_FRAMEMASK];
+    lump = sprframe->lump[0];
+    flip = (boolean)sprframe->flip[0];
+			
+    patch = R_SpritePatch (lump);		// decodes a PNG sprite on demand
+    if (flip)
+	V_DrawPatchFlipped (160,170,0,patch);
+    else
+	V_DrawPatch (160,170,0,patch);
+}
+
+
+//
+// F_DrawPatchCol
+//
+void
+F_DrawPatchCol
+( int		x,
+  patch_t*	patch,
+  int		col )
+{
+    column_t*	column;
+    byte*	source;
+    byte*	dest;
+    byte*	desttop;
+    int		count;
+	
+    column = (column_t *)((byte *)patch + LONG(patch->columnofs[col]));
+    desttop = screens[0]+x;
+
+    // step through the posts in a column
+    while (column->topdelta != 0xff )
+    {
+	source = (byte *)column + 3;
+	dest = desttop + column->topdelta*SCREENWIDTH;
+	count = column->length;
+		
+	while (count--)
+	{
+	    *dest = *source++;
+	    dest += SCREENWIDTH;
+	}
+	column = (column_t *)(  (byte *)column + column->length + 4 );
+    }
+}
+
+
+//
+// F_BunnyScroll
+//
+void F_BunnyScroll (void)
+{
+    int		scrolled;
+    int		x;
+    patch_t*	p1;
+    patch_t*	p2;
+    char	name[10];
+    int		stage;
+    static int	laststage;
+		
+    p1 = W_CacheLumpName ("PFUB2", PU_LEVEL);
+    p2 = W_CacheLumpName ("PFUB1", PU_LEVEL);
+
+    V_MarkRect (0, 0, SCREENWIDTH, SCREENHEIGHT);
+	
+    scrolled = 320 - (finalecount-230)/2;
+    if (scrolled > 320)
+	scrolled = 320;
+    if (scrolled < 0)
+	scrolled = 0;
+		
+    for ( x=0 ; x<SCREENWIDTH ; x++)
+    {
+	if (x+scrolled < 320)
+	    F_DrawPatchCol (x, p1, x+scrolled);
+	else
+	    F_DrawPatchCol (x, p2, x+scrolled - 320);		
+    }
+	
+    if (finalecount < 1130)
+	return;
+    if (finalecount < 1180)
+    {
+	V_DrawPatch ((SCREENWIDTH-13*8)/2,
+		     (SCREENHEIGHT-8*8)/2,0, W_CacheLumpName ("END0",PU_CACHE));
+	laststage = 0;
+	return;
+    }
+	
+    stage = (finalecount-1180) / 5;
+    if (stage > 6)
+	stage = 6;
+    if (stage > laststage)
+    {
+	S_StartSound (NULL, sfx_pistol);
+	laststage = stage;
+    }
+	
+    sprintf (name,"END%i",stage);
+    V_DrawPatch ((SCREENWIDTH-13*8)/2, (SCREENHEIGHT-8*8)/2,0, W_CacheLumpName (name,PU_CACHE));
+}
+
+
+//
+// F_Drawer
+//
+void F_Drawer (void)
+{
+    if (finalestage == 2)
+    {
+	F_CastDrawer ();
+	return;
+    }
+
+    if (!finalestage)
+	F_TextWrite ();
+    else if (um_endflags & U_END_ART)		// UMAPINFO endpic
+	V_DrawPatch (0,0,0, W_CacheLumpName (um_endpic, PU_CACHE));
+    else if (um_endflags & U_END_BUNNY)		// UMAPINFO endbunny
+	F_BunnyScroll ();
+    else
+    {
+	switch (gameepisode)
+	{
+	  case 1:
+	    if ( gamemode == retail )
+	      V_DrawPatch (0,0,0,
+			 W_CacheLumpName("CREDIT",PU_CACHE));
+	    else
+	      V_DrawPatch (0,0,0,
+			 W_CacheLumpName("HELP2",PU_CACHE));
+	    break;
+	  case 2:
+	    V_DrawPatch(0,0,0,
+			W_CacheLumpName("VICTORY2",PU_CACHE));
+	    break;
+	  case 3:
+	    F_BunnyScroll ();
+	    break;
+	  case 4:
+	    V_DrawPatch (0,0,0,
+			 W_CacheLumpName("ENDPIC",PU_CACHE));
+	    break;
+	}
+    }
+			
+}
+
+
