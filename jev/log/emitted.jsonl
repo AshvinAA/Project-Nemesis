@@ -1,0 +1,4 @@
+{"t":1789771679950,"kind":"act","detail":"[{\"order\":\"focus_fire\",\"ids\":[3],\"focus\":0,\"forTics\":70}]"}
+{"t":1789771679951,"kind":"spawn","detail":"imp x3"}
+{"t":1789771680574,"kind":"nemesis","detail":"[\"propose=imp tactic_weight=chase:-0.25 tactic_weight=focus_fire:-0.125\",\"propose=imp bias=unpredictability\"]"}
+{"t":1789771680757,"kind":"spawn","detail":"imp x3"}

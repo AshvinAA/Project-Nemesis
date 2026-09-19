@@ -1,6 +1,2 @@
-node_modules/
-log/*.jsonl
-SDL3/
-BuddyDoom/build/
-*.exe
-*.obj
+# Intentionally empty — this repo tracks ALL files, including binaries,
+# build outputs, SDKs, and runtime artifacts (owner's explicit choice).

@@ -1,0 +1,396 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\am_map.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\c_console.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\c_llm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_deh.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_items.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_net.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_netcl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\doomdef.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\doomstat.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\dsdhacked.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\dstrings.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\f_finale.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\f_wipe.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\freedoom.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\g_agent.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\g_game.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_deco.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_items.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_lichling.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_mvar.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_splash.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_weapons.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_deco.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_items.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_mon.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_things.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hu_buddy.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hu_lib.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hu_stuff.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_compat.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_mus.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_net.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_opl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_sound.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_system.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_udp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_video.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_voice.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\id24.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\info.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_argv.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_bbox.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_cheat.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_controls.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_fixed.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_menu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_misc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_random.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_swap.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\miniz.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\opl3.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_acs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ai_coop.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ai_director.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ai_llm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_boomsp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_buddydef.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ceilng.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_companion.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_doors.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_enemy.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_floor.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_genlin.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_inter.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_inv_heretic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_inv_strife.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_invent.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_lights.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_map.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_maputl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_mbf.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_mobj.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_morph.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_nemesis.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_plats.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_pspr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_saveg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_secdrone.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_setup.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_sight.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_spec.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_switch.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_telept.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_tick.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_turret.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_udmf.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_user.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\po_man.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_bsp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_data.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_draw.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_plane.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_segs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_sky.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_skydefs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_things.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\revmarine.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\s_sound.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds_heretic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds_hexen.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds_strife.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\st_lib.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\st_sbardef.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\st_stuff.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\stb_vorbis.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_deco.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_items.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_mon.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_stalker.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_weapons.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\tables.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\u_mapinfo.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\v_png.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\v_video.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\w_inflate.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\w_json.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\w_wad.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\wi_stuff.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\z_zone.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\buddydoom.rc">
+      <Filter>Source Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{0058F0D5-0C76-3E4A-BB2B-B5CA31498249}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

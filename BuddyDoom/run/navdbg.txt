@@ -1,0 +1,62 @@
+
+=== buddy rescue  map 1.1  tic 2612  leveltime 945 ===
+[void] reason: no progress toward the human for 12 s
+[void] at (175,1007) z=-128 floor=-128 ceil=0  sector f=-128 c=0  ongrid=1
+[void] recalled to home (-416,304)
+[void] radius=16 height=56 flags=SOLID  P_CheckPosition(here)=FITS
+[void]   (only meaningful on an ENTERED line -- once he is deep in
+[void]    the void there are no linedefs near his box, so FITS is
+[void]    trivially true and says nothing about how he got in.)
+[void] trace: buddy was INSIDE valid geometry for all 70 traced tics
+[void]        -> NOT a void event.  It simply could not reach the human
+[void]           (blocked route, hazard, or wedged in real geometry).
+[void] full nav diagnosis at the moment of the rescue:
+[nav] spot: valid   sector f=-128 c=0
+[nav] buddy (175,1007) z=-128 floor=-128 drop=-128 ss=6 edges=6
+[nav] you   (144,1040) floor=-128 ss=6 edges=6  dist=48
+[nav] flow  root ss=6 age=44 tics safe=0  dist here=ok next=-1
+[nav] caps  maxadj=0 inadj=0 maxpop=0 pathmax=0 lockedlines=0
+[nav]   edge -> ss4 floor+0 w=69 portal(208,1088)
+[nav]   edge -> ss10 floor+0 w=548 portal(120,592)
+[nav]   edge -> ss5 floor+0 w=280 portal(216,592)
+[nav]   edge -> ss3 floor+0 w=368 portal(216,1296)
+[nav]   edge -> ss12 floor+0 w=560 portal(120,1392)
+[nav]   edge -> ss18 floor+0 w=524 portal(120,1424)
+[nav] trail on=1 crumbs=48 broken links=3  connected run=[33..47] joins at (342,972)
+[nav] ROUTE ok -> waypoint (144,1040) d=48  steer=BLOCKED: wall/thing
+[nav]   blocked at (154,1029)
+[nav] corridor: 0 portals, at #0, goal ss-1, this hop = walk
+[nav] direct line to you: blocked: wall/thing  (at 154,1029)
+[nav]  E =walk  NE=walk
+[nav]  N =walk  NW=wall/thing
+[nav]  W =wall/thing  SW=wall/thing
+[nav]  S =walk  SE=walk
+
+=== buddy rescue  map 1.1  tic 2136  leveltime 2112 ===
+[void] reason: no progress toward the human for 12 s
+[void] at (810,330) z=-160 floor=-128 ceil=128  sector f=-128 c=128  ongrid=1
+[void] recalled to home (-416,304)
+[void] radius=16 height=56 flags=SOLID  P_CheckPosition(here)=FITS
+[void]   (only meaningful on an ENTERED line -- once he is deep in
+[void]    the void there are no linedefs near his box, so FITS is
+[void]    trivially true and says nothing about how he got in.)
+[void] trace: buddy was INSIDE valid geometry for all 70 traced tics
+[void]        -> NOT a void event.  It simply could not reach the human
+[void]           (blocked route, hazard, or wedged in real geometry).
+[void] full nav diagnosis at the moment of the rescue:
+[nav] spot: below its own floor   sector f=-128 c=128
+[nav] buddy (810,330) z=-160 floor=-128 drop=-128 ss=165 edges=2
+[nav] you   (765,285) floor=-128 ss=162 edges=1  dist=67
+[nav] flow  root ss=162 age=848 tics safe=0  dist here=ok next=162
+[nav] caps  maxadj=0 inadj=0 maxpop=0 pathmax=0 lockedlines=0
+[nav]   edge -> ss162 floor+0 w=261 portal(696,304)
+[nav]   edge -> ss153 floor+0 w=130 portal(856,464)
+[nav] trail on=1 crumbs=48 broken links=0  connected run=[0..47] joins at (-267,269)
+[nav] ROUTE ok -> waypoint (712,304) d=111  steer=BLOCKED: step up >24
+[nav]   blocked at (793,325)
+[nav] corridor: 2 portals, at #0, goal ss162, this hop = walk
+[nav] direct line to you: blocked: step up >24  (at 799,319)
+[nav]  E =step up >24  NE=step up >24
+[nav]  N =step up >24  NW=step up >24
+[nav]  W =step up >24  SW=step up >24
+[nav]  S =step up >24  SE=step up >24

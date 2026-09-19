@@ -1,0 +1,8 @@
+{"t":1789771679949,"purpose":"squad","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771679951,"purpose":"pacing","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771679952,"purpose":"adapt","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771680383,"purpose":"squad","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771680573,"purpose":"nemesis","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771680756,"purpose":"pacing","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771680819,"purpose":"squad","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}
+{"t":1789771681258,"purpose":"squad","latencyMs":0,"ok":true,"model":"mock-1.0","mock":true}

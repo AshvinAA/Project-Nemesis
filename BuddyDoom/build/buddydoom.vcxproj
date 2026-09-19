@@ -1,0 +1,579 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{DAFECDC1-4C5C-332A-B90B-CB46AD55363E}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>buddydoom</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">buddydoom.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">buddydoom</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">buddydoom.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">buddydoom</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">buddydoom.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">buddydoom</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">buddydoom.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">buddydoom</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>
+      </ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>	</Message>
+      <Command>setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Debug/buddydoom.exe C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Debug
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\lib\x64\SDL3.lib;ws2_32.lib;dbghelp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Debug/buddydoom.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Debug/buddydoom.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ExceptionHandling>
+      </ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>	</Message>
+      <Command>setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Release/buddydoom.exe C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Release
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\lib\x64\SDL3.lib;ws2_32.lib;dbghelp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Release/buddydoom.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/Release/buddydoom.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ExceptionHandling>
+      </ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>	</Message>
+      <Command>setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/MinSizeRel/buddydoom.exe C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/MinSizeRel
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\lib\x64\SDL3.lib;ws2_32.lib;dbghelp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/MinSizeRel/buddydoom.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/MinSizeRel/buddydoom.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>
+      </ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;SDL_MAIN_HANDLED;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>	</Message>
+      <Command>setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/RelWithDebInfo/buddydoom.exe C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/RelWithDebInfo
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/SHAHRIAR/Desktop/Project-Nemesis/SDL3/lib/x64/SDL3.dll C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/run/
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\lib\x64\SDL3.lib;ws2_32.lib;dbghelp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/RelWithDebInfo/buddydoom.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/RelWithDebInfo/buddydoom.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom -BC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build --check-stamp-file C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeGenericSystem.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeInitializeConfigs.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeLanguageInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeRCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\FeatureSummary.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-Initialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\WindowsPaths.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeRCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeSystem.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\cmake.verify_globs;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3Config.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3ConfigVersion.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\sdlcpu.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom -BC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build --check-stamp-file C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeGenericSystem.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeInitializeConfigs.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeLanguageInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeRCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\FeatureSummary.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-Initialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\WindowsPaths.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeRCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeSystem.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\cmake.verify_globs;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3Config.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3ConfigVersion.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\sdlcpu.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom -BC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build --check-stamp-file C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeGenericSystem.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeInitializeConfigs.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeLanguageInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeRCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\FeatureSummary.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-Initialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\WindowsPaths.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeRCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeSystem.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\cmake.verify_globs;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3Config.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3ConfigVersion.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\sdlcpu.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom -BC:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build --check-stamp-file C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeGenericSystem.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeInitializeConfigs.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeLanguageInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeRCInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Compiler\MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\FeatureSummary.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-Initialize.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC-C.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows-MSVC.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\Windows.cmake;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-3.31\Modules\Platform\WindowsPaths.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeRCCompiler.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\3.31.6-msvc6\CMakeSystem.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\cmake.verify_globs;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3Config.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\SDL3ConfigVersion.cmake;C:\Users\SHAHRIAR\Desktop\Project-Nemesis\SDL3\cmake\sdlcpu.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\am_map.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\c_console.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\c_llm.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_deh.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_items.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_main.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_net.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\d_netcl.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\doomdef.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\doomstat.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\dsdhacked.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\dstrings.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\f_finale.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\f_wipe.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\freedoom.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\g_agent.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\g_game.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_deco.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_items.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_lichling.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_mvar.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_splash.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\heretic_weapons.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_deco.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_items.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_mon.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hexen_things.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hu_buddy.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hu_lib.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\hu_stuff.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_compat.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_main.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_mus.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_net.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_opl.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_sound.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_system.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_udp.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_video.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\i_voice.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\id24.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\info.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_argv.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_bbox.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_cheat.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_controls.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_fixed.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_menu.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_misc.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_random.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\m_swap.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\miniz.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\opl3.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_acs.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ai_coop.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ai_director.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ai_llm.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_boomsp.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_buddydef.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_ceilng.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_companion.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_doors.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_enemy.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_floor.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_genlin.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_inter.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_inv_heretic.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_inv_strife.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_invent.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_lights.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_map.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_maputl.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_mbf.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_mobj.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_morph.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_nemesis.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_plats.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_pspr.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_saveg.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_secdrone.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_setup.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_sight.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_spec.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_switch.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_telept.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_tick.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_turret.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_udmf.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\p_user.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\po_man.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_bsp.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_data.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_draw.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_main.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_plane.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_segs.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_sky.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_skydefs.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\r_things.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\revmarine.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\s_sound.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds_heretic.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds_hexen.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\sounds_strife.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\st_lib.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\st_sbardef.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\st_stuff.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\stb_vorbis.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_deco.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_items.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_mon.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_stalker.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\strife_weapons.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\tables.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\u_mapinfo.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\v_png.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\v_video.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\w_inflate.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\w_json.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\w_wad.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\wi_stuff.c" />
+    <ClCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\z_zone.c" />
+    <ResourceCompile Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\files\buddydoom.rc" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="C:\Users\SHAHRIAR\Desktop\Project-Nemesis\BuddyDoom\build\ZERO_CHECK.vcxproj">
+      <Project>{99A66C35-0ABE-3444-AE56-06AB00437243}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

@@ -1,0 +1,8 @@
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/buddydoom.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/buddydoom_config.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/gpumon_sdl.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/launcher.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/extractor.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/director.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/CMakeFiles/ZERO_CHECK.dir
