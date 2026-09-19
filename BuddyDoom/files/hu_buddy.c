@@ -1,0 +1,626 @@
+// Emacs style mode select   -*- C++ -*-
+//-----------------------------------------------------------------------------
+//
+// DESCRIPTION:
+//	A compact readout for the AI co-op companion, pinned to the TOP-RIGHT corner.
+//	It is drawn in the small Doom HUD message font (hu_font / STCFN*) at the SAME
+//	size and native colour as the in-game pickup messages -- via V_DrawPatch, which
+//	handles the hi-res scaling -- so it stays crisp and readable at any internal
+//	resolution.  Two right-aligned lines:
+//
+//	   BUDDY  HP 100  AR 99
+//	   SHOTGUN 50
+//
+//	Authored in BASE (320x200 / wide-base) coordinates; V_DrawPatch does the rest.
+//
+//-----------------------------------------------------------------------------
+
+#include <stdio.h>
+#include <string.h>
+
+#include "doomdef.h"
+#include "doomstat.h"
+#include "d_player.h"
+#include "d_items.h"
+#include "m_swap.h"
+#include "tables.h"                 // ANG45 / ANG180 (attacker-direction face)
+#include "r_defs.h"
+#include "r_main.h"                 // R_PointToAngle2
+#include "v_video.h"
+#include "w_wad.h"                  // W_CheckNumForName / W_CacheLumpNum (buddydoom.wad faces)
+#include "z_zone.h"                 // PU_STATIC
+
+#include "hu_stuff.h"               // HU_FONTSTART / HU_FONTSIZE + the small Doom HUD font
+#include "st_stuff.h"               // ST_HEIGHT (position the inventory line above the status bar)
+
+#include "hu_buddy.h"
+#include "p_ai_coop.h"
+#include "p_mobj.h"                 // mobj_t (the BUDDYDEF companion is an mobj, not a player)
+
+// The small Doom HUD font (STCFN033..STCFN095), loaded by HU_Init in hu_stuff.c.
+extern patch_t* hu_font[HU_FONTSIZE];
+
+// On/off (persisted as config key `show_buddy_hud`).  Default ON; the Drawer is a
+// no-op when no co-op buddy is active anyway.
+int show_buddy_hud = 1;
+
+// (J) On/off for the artifact-inventory readout (config key `show_inventory_hud`).
+int show_inventory_hud = 1;
+
+// Weapon names (readyweapon index -> label) for the readout.
+static const char* weapon_short[] = {
+    "FIST", "PISTOL", "SHOTGUN", "CHAINGUN",
+    "ROCKET", "PLASMA", "BFG", "CHAINSAW", "SSG",
+};
+
+// Buddy status line, indexed by P_AICoop_State() (0=follow .. 5=grab).
+static const char* buf_status[] = {
+    "FOLLOWING", "ATTACKING", "HEALING", "HOLDING", "COMING", "GRABBING",
+};
+
+
+// hu_font is loaded by HU_Init; nothing else to cache here.
+void HU_Buddy_Init  (void) {}
+void HU_Buddy_SetRes (void) {}
+
+
+// ---------------------------------------------------------------------------
+//  Buddy mugshot faces (BUF*) -- a distinct set from the player's STF*, packed
+//  into buddydoom.wad (from tools/wad.gfx via tools/bake_buddy_voice.py).  Loaded lazily: the WAD is added at
+//  startup (I_Voice_Init), so the lumps exist by the time the HUD ticks/draws; if
+//  buddydoom.wad is absent the faces stay unloaded and the HUD falls back to a text
+//  label.  The face is ANIMATED exactly like the player's (st_stuff.c): a flat
+//  42-entry array in the same layout, driven by a ported ST_updateFaceWidget state
+//  machine ticked once per game tic (HU_Buddy_Ticker).
+//
+//  Layout per pain level p (0=healthy .. 4=near death), 8 faces each:
+//     +0,1,2  straight (look c/r/l)   +3 turn-right  +4 turn-left
+//     +5 ouch  +6 evil grin  +7 rampage     then GOD (40), DEAD (41).
+// ---------------------------------------------------------------------------
+#define BF_NUMFACES		42
+#define BF_STRIDE		8
+#define BF_TURNOFFSET		3
+#define BF_OUCHOFFSET		5
+#define BF_EVILGRINOFFSET	6
+#define BF_RAMPAGEOFFSET	7
+#define BF_GODFACE		40
+#define BF_DEADFACE		41
+#define BF_EVILGRINCOUNT	(2*TICRATE)
+#define BF_STRAIGHTFACECOUNT	(TICRATE/2)
+#define BF_TURNCOUNT		(1*TICRATE)
+#define BF_RAMPAGEDELAY		(2*TICRATE)
+#define BF_MUCHPAIN		20
+
+static patch_t* buf_faces[BF_NUMFACES];
+static int      faces_tried;        // 0 = not yet, 1 = attempted
+static int      faces_ok;           // all 42 lumps present?
+static int      bf_index;           // current face (index into buf_faces), set by the Ticker
+static int      bf_count;           // tics left on the current expression
+
+// Cosmetic RNG for the random "look" direction.  Deliberately NOT M_Random -- the
+// HUD must never touch the game RNG (it would desync the deterministic playsim).
+static int HU_Buddy_FaceRand (void)
+{
+    static unsigned s = 1;
+    s = s * 1103515245u + 12345u;
+    return (int)((s >> 16) & 0x7fff);
+}
+
+static patch_t* HU_Buddy_LoadFace (const char* name, int* ok)
+{
+    char	nm[9];
+    int		l;
+    patch_t*	p;
+    strncpy (nm, name, 8); nm[8] = 0;
+    l = W_CheckNumForName (nm);
+    if (l < 0) { *ok = 0; return NULL; }
+    // The face lumps may be classic Doom patches OR true-colour PNGs (buddydoom.wad
+    // now ships them as PNG).  V_PNGLumpToPatch decodes a PNG lump into a PU_STATIC
+    // patch -- nearest-matched to the live palette (so it's correct in Heretic too),
+    // grAb offsets applied -- and returns NULL for a non-PNG lump, so fall back to the
+    // raw patch.  Either way V_DrawPatch draws the result unchanged.
+    p = V_PNGLumpToPatch (l);
+    if (!p)
+	p = (patch_t*) W_CacheLumpNum (l, PU_STATIC);
+    return p;
+}
+
+// (The down-state HUD shows a compass arrow in the mugshot slot -- see the
+// PST_DEAD block in HU_Buddy_DrawStats.  The old medkit sprite that lived here
+// never rendered, so it was removed.)
+
+static void HU_Buddy_LoadFaces (void)
+{
+    int  i, j, fn = 0, ok = 1;
+    char nm[9];
+    if (faces_tried) return;
+    faces_tried = 1;
+    for (i = 0; i < 5; i++)
+    {
+	for (j = 0; j < 3; j++)
+	    { sprintf (nm, "BUFST%d%d", i, j); buf_faces[fn++] = HU_Buddy_LoadFace (nm, &ok); }
+	sprintf (nm, "BUFTR%d0", i);  buf_faces[fn++] = HU_Buddy_LoadFace (nm, &ok);  // turn right
+	sprintf (nm, "BUFTL%d0", i);  buf_faces[fn++] = HU_Buddy_LoadFace (nm, &ok);  // turn left
+	sprintf (nm, "BUFOUCH%d", i); buf_faces[fn++] = HU_Buddy_LoadFace (nm, &ok);  // ouch
+	sprintf (nm, "BUFEVL%d", i);  buf_faces[fn++] = HU_Buddy_LoadFace (nm, &ok);  // evil grin
+	sprintf (nm, "BUFKILL%d", i); buf_faces[fn++] = HU_Buddy_LoadFace (nm, &ok);  // rampage
+    }
+    buf_faces[fn++] = HU_Buddy_LoadFace ("BUFGOD0",  &ok);
+    buf_faces[fn++] = HU_Buddy_LoadFace ("BUFDEAD0", &ok);
+    faces_ok = ok;
+}
+
+// FACESTRIDE * pain-bucket, exactly like ST_calcPainOffset.
+static int HU_Buddy_PainOffset (int health)
+{
+    if (health > 100) health = 100;
+    if (health < 0)   health = 0;
+    return BF_STRIDE * (((100 - health) * 5) / 101);
+}
+
+// Ported ST_updateFaceWidget, driven by the buddy's player_t.  Runs once per tic
+// (HU_Buddy_Ticker).  Precedence: dead > evil grin > attacked/turn > self-hurt >
+// rampage > god > idle look.  (The vanilla "ouch" health-delta test is inverted
+// here so the ouch face actually triggers on a big hit -- the original `health -
+// oldhealth > MUCHPAIN` is the well-known Doom bug that all but disables it.)
+static void HU_Buddy_FaceTick (player_t* bot)
+{
+    static int     lastattackdown = -1;
+    static int     priority = 0;
+    static int     oldhealth = -1;
+    static boolean oldweap[NUMWEAPONS];
+    int            i;
+    angle_t        badang, diffang;
+    boolean        grin;
+
+    if (priority < 10 && !bot->health)
+	{ priority = 9; bf_index = BF_DEADFACE; bf_count = 1; }
+
+    if (priority < 9 && bot->bonuscount)
+    {
+	grin = false;
+	for (i = 0; i < NUMWEAPONS; i++)
+	    if (oldweap[i] != bot->weaponowned[i]) { grin = true; oldweap[i] = bot->weaponowned[i]; }
+	if (grin)
+	    { priority = 8; bf_count = BF_EVILGRINCOUNT;
+	      bf_index = HU_Buddy_PainOffset (bot->health) + BF_EVILGRINOFFSET; }
+    }
+
+    if (priority < 8 && bot->damagecount && bot->attacker && bot->attacker != bot->mo)
+    {
+	priority = 7;
+	if (oldhealth - bot->health > BF_MUCHPAIN)
+	    { bf_count = BF_TURNCOUNT; bf_index = HU_Buddy_PainOffset (bot->health) + BF_OUCHOFFSET; }
+	else
+	{
+	    badang = R_PointToAngle2 (bot->mo->x, bot->mo->y, bot->attacker->x, bot->attacker->y);
+	    if (badang > bot->mo->angle) { diffang = badang - bot->mo->angle; i = diffang > ANG180; }
+	    else                         { diffang = bot->mo->angle - badang; i = diffang <= ANG180; }
+	    bf_count = BF_TURNCOUNT;
+	    bf_index = HU_Buddy_PainOffset (bot->health);
+	    if      (diffang < ANG45) bf_index += BF_RAMPAGEOFFSET;   // head-on
+	    else if (i)               bf_index += BF_TURNOFFSET;      // turn right
+	    else                      bf_index += BF_TURNOFFSET + 1;  // turn left
+	}
+    }
+
+    if (priority < 7 && bot->damagecount)
+    {
+	if (oldhealth - bot->health > BF_MUCHPAIN)
+	    { priority = 7; bf_count = BF_TURNCOUNT;
+	      bf_index = HU_Buddy_PainOffset (bot->health) + BF_OUCHOFFSET; }
+	else
+	    { priority = 6; bf_count = BF_TURNCOUNT;
+	      bf_index = HU_Buddy_PainOffset (bot->health) + BF_RAMPAGEOFFSET; }
+    }
+
+    if (priority < 6)
+    {
+	if (bot->attackdown)
+	{
+	    if (lastattackdown == -1) lastattackdown = BF_RAMPAGEDELAY;
+	    else if (!--lastattackdown)
+		{ priority = 5; bf_index = HU_Buddy_PainOffset (bot->health) + BF_RAMPAGEOFFSET;
+		  bf_count = 1; lastattackdown = 1; }
+	}
+	else lastattackdown = -1;
+    }
+
+    if (priority < 5 && ((bot->cheats & CF_GODMODE) || bot->powers[pw_invulnerability]))
+	{ priority = 4; bf_index = BF_GODFACE; bf_count = 1; }
+
+    if (!bf_count)
+	{ bf_index = HU_Buddy_PainOffset (bot->health) + (HU_Buddy_FaceRand () % 3);
+	  bf_count = BF_STRAIGHTFACECOUNT; priority = 0; }
+
+    bf_count--;
+    oldhealth = bot->health;
+}
+
+// Per-tic face update (called from HU_Ticker).
+void HU_Buddy_Ticker (void)
+{
+    int       slot;
+    player_t* bot;
+
+    if (!show_buddy_hud) return;
+    slot = P_AICoop_Slot ();
+    if (slot < 0 || !playeringame[slot]) return;
+    HU_Buddy_LoadFaces ();
+    if (!faces_ok) return;
+    bot = &players[slot];
+    HU_Buddy_FaceTick (bot);
+}
+
+// The current animated mugshot (or NULL if the faces aren't available).
+static patch_t* HU_Buddy_Face (void)
+{
+    HU_Buddy_LoadFaces ();
+    if (!faces_ok || bf_index < 0 || bf_index >= BF_NUMFACES) return NULL;
+    return buf_faces[bf_index];
+}
+
+
+// ===========================================================================
+//  Small Doom HUD font (hu_font) -- drawn / measured exactly like a message.
+//  V_DrawPatch copies the patch's own (native-colour) pixels and applies the
+//  hi-res scaling, so the readout matches the in-game messages 1:1.
+// ===========================================================================
+
+static int HU_Buddy_TextW (const char* s)
+{
+    int w = 0;
+    for (; *s; s++)
+    {
+	char c = *s;
+	if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+	if (c == ' ' || c < HU_FONTSTART || c > HU_FONTEND) { w += 4; continue; }
+	{ patch_t* p = hu_font[c - HU_FONTSTART]; w += p ? SHORT (p->width) : 4; }
+    }
+    return w;
+}
+
+static void HU_Buddy_TextT (int x, int y, const char* s, const byte* trans)
+{
+    for (; *s; s++)
+    {
+	char c = *s;
+	if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+	if (c == ' ' || c < HU_FONTSTART || c > HU_FONTEND) { x += 4; continue; }
+	{
+	    patch_t* p = hu_font[c - HU_FONTSTART];
+	    if (!p) { x += 4; continue; }
+	    V_DrawPatchTranslated (x, y, 0, p, trans);	// trans==NULL -> normal colour
+	    x += SHORT (p->width);
+	}
+    }
+}
+
+static void HU_Buddy_Text (int x, int y, const char* s) { HU_Buddy_TextT (x, y, s, NULL); }
+
+// Top-right readout: the buddy's mugshot (by health) followed by two right-aligned
+// message-font lines (HP/armor, weapon/ammo).  The mugshot replaces the old "BUDDY"
+// label; if the BUF* faces are missing it falls back to that text label.
+// The buddy's held artifacts, drawn as pickup-sprite ICONS (frame A0) with a count.
+// Each artifact maps to its DOOM/Heretic pickup lump; a short text TAG is the fallback
+// when that icon lump isn't in the loaded WADs (e.g. the Heretic artifacts under DOOM).
+// arti_none + the ammo-overflow slots are NULL (overflow ammo isn't an inventory item).
+static const char* const buddy_arti_icon[NUMARTIFACTS] =
+{
+    [arti_stimpack]   = "STIMA0", [arti_medikit]   = "MEDIA0", [arti_healthbonus] = "BON1A0",
+    [arti_armorbonus] = "BON2A0", [arti_greenarmor]= "ARM1A0", [arti_bluearmor]   = "ARM2A0",
+    [h_arti_flask]    = "PTN1A0", [h_arti_urn]     = "SPHLA0", [h_arti_tome]      = "PWBKA0",
+    [h_arti_torch]    = "TRCHA0", [h_arti_bomb]    = "FBMBA0", [h_arti_ring]      = "INVUA0",
+    [h_arti_shadow]   = "INVSA0", [h_arti_chaos]   = "ATLPA0", [h_arti_wings]     = "SOARA0",
+    [h_arti_egg]      = "EGGCA0", [h_arti_flechette]= "PSBGA0",
+};
+static const char* const buddy_arti_tag[NUMARTIFACTS] =
+{
+    [arti_stimpack]   = "STIM", [arti_medikit]   = "MED",  [arti_healthbonus] = "HP+",
+    [arti_armorbonus] = "AR+",  [arti_greenarmor]= "GARM", [arti_bluearmor]   = "BARM",
+    [h_arti_flask]    = "FLSK", [h_arti_urn]     = "URN",  [h_arti_tome]      = "BSRK",
+    [h_arti_torch]    = "TRCH", [h_arti_bomb]    = "BOMB", [h_arti_ring]      = "INVU",
+    [h_arti_shadow]   = "SHDW", [h_arti_chaos]   = "CHAO", [h_arti_wings]     = "WING",
+    [h_arti_egg]      = "EGG",  [h_arti_flechette]= "FLCH",
+};
+
+// The buddy's OWN artifact inventory, drawn right-to-left from the right margin on a
+// 4th strip line: each held artifact's pickup icon + its count (text tag if no icon).
+// The buddy carries the full artifact set like any co-op player and auto-uses health
+// items (AICoop_AutoHeal); this just shows what it has.  Nothing when the pack is empty.
+static boolean HU_IconFits (patch_t* p, int x, int y);	// defined below
+
+static void HU_Buddy_DrawInventory (player_t* bot, int y)
+{
+    int wb = SCREENWIDTH / hires;
+    int x  = wb - 4;			// right edge; we walk leftward
+    int a;
+
+    for (a = NUMARTIFACTS - 1 ; a > arti_none ; a--)
+    {
+	int	 cnt = bot->inventory[a];
+	patch_t* p   = NULL;
+	char	 num[8];
+	int	 nw, ln;
+
+	if (cnt <= 0)
+	    continue;
+
+	if (buddy_arti_icon[a] && (ln = W_CheckNumForName (buddy_arti_icon[a])) >= 0)
+	    p = (patch_t*) W_CacheLumpNum (ln, PU_CACHE);
+
+	snprintf (num, sizeof num, "%d", cnt);
+	nw = HU_Buddy_TextW (num);
+
+	// Same bounds check the other two inventory draw sites use.  This one was
+	// missed when HU_IconFits was added, and it is the site that crashes: a
+	// pickup SPRITE carries world offsets sized for the playfield, so on a map
+	// where the buddy is holding one of those (Hexen MAP03) the draw landed
+	// outside the framebuffer.
+	if (p && HU_IconFits (p, x - nw - SHORT (p->width) + SHORT (p->leftoffset),
+				 y + SHORT (p->topoffset)))
+	{
+	    // count just right of the icon, then the icon (offsets compensated so its
+	    // visible top-left lands at (x, y)).
+	    x -= nw;                 HU_Buddy_Text (x, y + 4, num);
+	    x -= SHORT (p->width);   V_DrawPatch (x + SHORT (p->leftoffset),
+						  y + SHORT (p->topoffset), 0, p);
+	    x -= 4;
+	}
+	else if (buddy_arti_tag[a])	// no icon lump -> text tag "TAGxN"
+	{
+	    char t[24];
+	    snprintf (t, sizeof t, "%sx%d", buddy_arti_tag[a], cnt);
+	    x -= HU_Buddy_TextW (t);   HU_Buddy_Text (x, y, t);
+	    x -= 4;
+	}
+	if (x < 0)
+	    break;
+    }
+}
+
+static void HU_Buddy_DrawStrip (player_t* bot)
+{
+    int      hp   = bot->health;
+    int      arm  = bot->armorpoints;
+    int      w    = bot->readyweapon;
+    int      ammo = -1;
+    int      wb   = SCREENWIDTH / hires;   // wide base width = the V_ coordinate space
+    int      textw, tx, st;
+    patch_t* face;
+    char     l1[40], l2[40], l3[40];
+
+    // Downed (incapacitated, not dead): replace the mugshot + stats with a REVIVE
+    // prompt and -- in the mugshot slot -- a COMPASS arrow pointing the human toward
+    // the downed buddy, so he can be found and revived.
+    if (bot->playerstate == PST_DEAD)
+    {
+	const char* d1  = "BUDDY DOWN";
+	const char* d2  = "REVIVE: USE";
+	int         dw  = HU_Buddy_TextW (d1);
+	int         w2  = HU_Buddy_TextW (d2);
+	int         dtx;
+	mobj_t*     pl  = players[consoleplayer].mo;	// the human (not the buddy)
+	mobj_t*     bd  = bot->mo;
+	if (w2 > dw) dw = w2;
+	dtx = wb - 4 - dw;
+	HU_Buddy_Text (dtx, 2,  d1);
+	HU_Buddy_Text (dtx, 12, d2);
+
+	// (C) Compass in the mugshot slot: screen-relative bearing -> one of 8
+	// direction arrows (RARR* PNGs in buddydoom.wad, decoded via V_CachePNG).
+	if (pl && bd)
+	{
+	    // rel: 0 ahead, ANG90 left, ANG180 behind, ANG270 right.  Octant 0..7.
+	    angle_t  rel = R_PointToAngle2 (pl->x, pl->y, bd->x, bd->y) - pl->angle;
+	    unsigned oct = ((unsigned)(rel + ANG45/2) >> 29) & 7;
+	    // index by octant: ahead(N), ahead-left(NW), left(W), behind-left(SW),
+	    // behind(S), behind-right(SE), right(E), ahead-right(NE).
+	    static const char* arr[8] =
+		{ "RARRC0","RARRB0","RARRA0","RARRH0","RARRG0","RARRF0","RARRE0","RARRD0" };
+	    patch_t* a = V_CachePNG (arr[oct]);
+	    if (a) V_DrawPatch (dtx - SHORT (a->width) - 6, 1, 0, a);	// mugshot slot
+	}
+	return;
+    }
+
+    face = HU_Buddy_Face ();
+    st   = P_AICoop_State ();
+
+    if (w >= 0 && w < NUMWEAPONS && weaponinfo[w].ammo < NUMAMMO)
+	ammo = bot->ammo[weaponinfo[w].ammo];
+
+    // With a mugshot the lines are just stats; without one, prefix the "BUDDY" label.
+    snprintf (l1, sizeof l1, face ? "HP %d  AR %d" : "BUDDY  HP %d  AR %d", hp, arm);
+    if (ammo >= 0) snprintf (l2, sizeof l2, "%s %d",
+			     (w >= 0 && w < NUMWEAPONS) ? weapon_short[w] : "", ammo);
+    else           snprintf (l2, sizeof l2, "%s",
+			     (w >= 0 && w < NUMWEAPONS) ? weapon_short[w] : "");
+    snprintf (l3, sizeof l3, "%s",
+	      (st >= 0 && st < (int)(sizeof(buf_status)/sizeof(buf_status[0]))) ? buf_status[st] : "");
+
+    textw = HU_Buddy_TextW (l1);
+    { int w2 = HU_Buddy_TextW (l2); if (w2 > textw) textw = w2; }
+    { int w3 = HU_Buddy_TextW (l3); if (w3 > textw) textw = w3; }
+    tx = wb - 4 - textw;
+
+    // l1 line with the HP number coloured by value (>75 green, >25 yellow, else red).
+    {
+	const char* pre = face ? "HP " : "BUDDY  HP ";
+	char        hpn[16]; snprintf (hpn, sizeof hpn, "%d", hp);
+	char        suf[24]; snprintf (suf, sizeof suf, "  AR %d", arm);
+	int         x0 = tx;
+	HU_Buddy_TextT (x0, 2, pre, NULL);                  x0 += HU_Buddy_TextW (pre);
+	HU_Buddy_TextT (x0, 2, hpn, V_HealthTrans (hp));    x0 += HU_Buddy_TextW (hpn);
+	HU_Buddy_TextT (x0, 2, suf, NULL);
+    }
+    HU_Buddy_Text (tx, 12, l2);
+    HU_Buddy_Text (tx, 22, l3);
+
+    // The buddy's own artifact inventory, on a 4th line below the status line.
+    // (H) purely-native Heretic: the native player inventory bar is the only artifact
+    // readout in heretic_mode, so skip the buddy's strip there.
+    { extern int heretic_mode; if (!heretic_mode) HU_Buddy_DrawInventory (bot, 32); }
+
+    // Mugshot just left of the text block (BUF* patches carry a -5/-2 offset, so
+    // V_DrawPatch shifts them right/down a touch -- accounted for in the x below).
+    if (face) V_DrawPatch (tx - SHORT (face->width) - 6, 1, 0, face);
+}
+
+
+// ===========================================================================
+//  Drawer (called from HU_Drawer in hu_stuff.c)
+// ===========================================================================
+
+void HU_Buddy_Drawer (void)
+{
+    player_t* bot;
+    int       slot;
+
+    if (!show_buddy_hud) return;
+    if (menuactive || paused) return;
+    {
+	extern gamestate_t wipegamestate;
+	if (wipegamestate != GS_LEVEL) return;
+    }
+
+    slot = P_AICoop_Slot ();
+    if (slot < 0 || !playeringame[slot]) return;	// no buddy in the co-op slot
+    bot = &players[slot];
+    if (!bot->mo) return;
+    // Draw while alive OR while DOWN (PST_DEAD = incapacitated, revivable) -- the
+    // down view shows a medkit so the player can find him.
+    if (bot->playerstate != PST_LIVE && bot->playerstate != PST_DEAD) return;
+
+    HU_Buddy_DrawStrip (bot);
+}
+
+
+// ===========================================================================
+//  (J) Heretic-style artifact inventory readout.
+//
+//  A simple bottom-centre line showing the currently-selected artifact and how
+//  many of it the player holds, e.g. "QUARTZ FLASK x3".  Drawn in the same small
+//  HUD message font (so it scales with the hi-res renderer via V_DrawPatch) and
+//  authored in BASE / wide-base coordinates, just above the status bar.
+//  Reuses the static text helpers above (HU_Buddy_Text / HU_Buddy_TextW).
+// ===========================================================================
+
+// (J) Heretic-style artifact inventory bar (replaces the old bottom-centre text
+// readout).  Like Heretic: the SELECTED artifact sits in a box in the bottom-right
+// corner, and the full icon RIBBON pops up (centred, above the status bar) for a few
+// seconds while the player scrolls the selection -- P_InvScroll stamps hinv_show_until,
+// the SAME timer the native heretic_mode bar (st_stuff.c) uses.  Icons are the pickup
+// sprites (buddy_arti_icon[]), available from buddydoom.wad, so no Heretic HUD chrome is
+// needed and it works in plain DOOM.  heretic_mode draws its own native bar -> skipped.
+// Is this icon safe to draw at (x,y) in BASE coords?  The inventory slots show a
+// pickup SPRITE, and a sprite carries real world offsets sized for the playfield --
+// the Hexen Flechette (PSBGA0) is a full-size poison bag, and once those artifacts
+// became obtainable its offsets pushed the draw off the top of the screen and
+// V_DrawPatch wrote outside the framebuffer.  Reject anything that will not sit
+// inside 320x200 and let the caller fall back to the text tag.
+// (x,y) is the coordinate that will be handed to V_DrawPatch -- NOT the icon's
+// top-left.  V_DrawPatch draws at (x - leftoffset, y - topoffset), so that is the
+// rect to test.  Testing (x,y) directly measured the box from the wrong corner and
+// over-estimated the right edge by leftoffset, which is about half a sprite's
+// width: the selected-item box sits against the right edge, so its icon always
+// came out "too wide to fit" and silently fell back to the text tag.  The medikit
+// (28 wide, offset 13) was rejected at 334+28=362 > 355 while really occupying
+// 321..349.
+static boolean HU_IconFits (patch_t* p, int x, int y)
+{
+    int w, h, l, t;
+    if (!p) return false;
+    w = SHORT (p->width); h = SHORT (p->height);
+    if (w <= 0 || h <= 0 || w > 40 || h > 40) return false;	// slot-sized icons only
+
+    l = x - SHORT (p->leftoffset);		// where it actually lands
+    t = y - SHORT (p->topoffset);
+
+    // Bound against the DRAWABLE area, which in widescreen is wider than
+    // BASE_WIDTH -- that is the limit V_DrawPatch itself uses.
+    return l >= 0 && t >= 0
+	&& l + w <= SCREENWIDTH / hires
+	&& t + h <= SCREENHEIGHT / hires;
+}
+
+void HU_Inventory_Drawer (void)
+{
+    extern const char*	P_ArtifactName (artitype_t a);
+    extern int		hinv_show_until;
+    extern int		statusbar_style;
+    player_t*	pl = &players[consoleplayer];
+    int		wb = SCREENWIDTH / hires;
+    artitype_t	held[NUMARTIFACTS];
+    int		cnt[NUMARTIFACTS];
+    int		n = 0, sel = -1, a, i, ln, invy;
+    patch_t*	p;
+    char	num[8];
+#define INV_SLOT 28	// px per ribbon slot
+
+    if (!show_inventory_hud) return;
+    { extern int heretic_mode; if (heretic_mode) return; }	// heretic draws its own native bar
+    if (menuactive || paused) return;
+    { extern gamestate_t wipegamestate; if (wipegamestate != GS_LEVEL) return; }
+
+    // Compacted list of held artifacts that have an icon (overflow/ammo slots don't).
+    for (a = arti_none + 1; a < NUMARTIFACTS; a++)
+	if (pl->inventory[a] > 0 && buddy_arti_icon[a])
+	{
+	    if (a == pl->invslot) sel = n;
+	    cnt[n]    = pl->inventory[a];
+	    held[n++] = (artitype_t) a;
+	}
+    if (n == 0) return;
+    if (sel < 0) sel = 0;
+
+    // Icon row sits just above the status bar (lower when the small/alt bar is active).
+    invy = BASE_HEIGHT - (statusbar_style == 0 ? ST_HEIGHT : ST_HEIGHT/2) - 26;
+
+    if (leveltime < hinv_show_until)
+    {
+	// --- browsing: the full ribbon, centred, selected slot bracketed + named ---
+	int x0 = (wb - n*INV_SLOT) / 2;
+	if (x0 < 4) x0 = 4;
+	for (i = 0; i < n; i++)
+	{
+	    int cx = x0 + i*INV_SLOT;
+	    p = ((ln = W_CheckNumForName (buddy_arti_icon[held[i]])) >= 0)
+		? (patch_t*) W_CacheLumpNum (ln, PU_CACHE) : NULL;
+	    {
+		int il = p ? cx + (INV_SLOT - SHORT (p->width)) / 2 : 0;
+		int ix = p ? il + SHORT (p->leftoffset) : 0;
+		int iy = p ? invy + SHORT (p->topoffset) : 0;
+		if (HU_IconFits (p, ix, iy)) V_DrawPatch (ix, iy, 0, p);
+		else p = NULL;			// fall through to the text tag
+	    }
+	    if (!p && buddy_arti_tag[held[i]])
+		HU_Buddy_Text (cx + 2, invy + 6, buddy_arti_tag[held[i]]);
+	    if (cnt[i] > 1)
+	    { snprintf (num, sizeof num, "%d", cnt[i]); HU_Buddy_Text (cx + INV_SLOT - 10, invy + 15, num); }
+	    if (i == sel)
+	    { HU_Buddy_Text (cx - 4, invy + 2, "["); HU_Buddy_Text (cx + INV_SLOT - 5, invy + 2, "]"); }
+	}
+	{ const char* nm = P_ArtifactName (held[sel]);
+	  int nx = (wb - HU_Buddy_TextW (nm)) / 2;  if (nx < 0) nx = 0;
+	  HU_Buddy_Text (nx, invy + 17, nm); }
+    }
+    else
+    {
+	// --- idle: just the selected artifact, in a box in the bottom-right corner ---
+	int cx = wb - INV_SLOT - 6;
+	p = ((ln = W_CheckNumForName (buddy_arti_icon[held[sel]])) >= 0)
+	    ? (patch_t*) W_CacheLumpNum (ln, PU_CACHE) : NULL;
+	{
+	    int ix = p ? cx + (INV_SLOT - SHORT (p->width))/2 + SHORT (p->leftoffset) : 0;
+	    int iy = p ? invy + SHORT (p->topoffset) : 0;
+	    if (HU_IconFits (p, ix, iy)) V_DrawPatch (ix, iy, 0, p);
+	    else p = NULL;
+	}
+	if (!p && buddy_arti_tag[held[sel]])
+	    HU_Buddy_Text (cx + 2, invy + 6, buddy_arti_tag[held[sel]]);
+	if (cnt[sel] > 1)
+	{ snprintf (num, sizeof num, "%d", cnt[sel]); HU_Buddy_Text (cx + INV_SLOT - 10, invy + 15, num); }
+    }
+#undef INV_SLOT
+}

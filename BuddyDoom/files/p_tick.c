@@ -1,0 +1,173 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	Archiving: SaveGame I/O.
+//	Thinker, Ticker.
+//
+//-----------------------------------------------------------------------------
+
+static const char
+rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
+
+#include "z_zone.h"
+#include "p_local.h"
+#include "p_ai_llm.h"
+#include "p_ai_coop.h"
+#include "p_ai_director.h"
+#include "p_morph.h"		// (M) generic morph subsystem -- age morph timers
+#include "revmarine.h"		// (G) revived-marine per-second HP regen
+#include "p_buddydef.h"		// BUDDYDEF `ability` ticker (poisoncloud / drone)
+
+#include "doomstat.h"
+
+
+int	leveltime;
+
+//
+// THINKERS
+// All thinkers should be allocated by Z_Malloc
+// so they can be operated on uniformly.
+// The actual structures will vary in size,
+// but the first element must be thinker_t.
+//
+
+
+
+// Both the head and tail of the thinker list.
+thinker_t	thinkercap;
+
+
+//
+// P_InitThinkers
+//
+void P_InitThinkers (void)
+{
+    thinkercap.prev = thinkercap.next  = &thinkercap;
+}
+
+
+
+
+//
+// P_AddThinker
+// Adds a new thinker at the end of the list.
+//
+void P_AddThinker (thinker_t* thinker)
+{
+    thinkercap.prev->next = thinker;
+    thinker->next = &thinkercap;
+    thinker->prev = thinkercap.prev;
+    thinkercap.prev = thinker;
+}
+
+
+
+//
+// P_RemoveThinker
+// Deallocation is lazy -- it will not actually be freed
+// until its thinking turn comes up.
+//
+void P_RemoveThinker (thinker_t* thinker)
+{
+  // FIXME: NOP.
+  thinker->function.acv = (actionf_v)(-1);
+}
+
+
+
+//
+// P_AllocateThinker
+// Allocates memory and adds a new thinker at the end of the list.
+//
+void P_AllocateThinker (thinker_t*	thinker)
+{
+}
+
+
+
+//
+// P_RunThinkers
+//
+void P_RunThinkers (void)
+{
+    thinker_t*	currentthinker;
+
+    currentthinker = thinkercap.next;
+    while (currentthinker != &thinkercap)
+    {
+	if ( currentthinker->function.acv == (actionf_v)(-1) )
+	{
+	    // time to remove it
+	    currentthinker->next->prev = currentthinker->prev;
+	    currentthinker->prev->next = currentthinker->next;
+	    Z_Free (currentthinker);
+	}
+	else
+	{
+	    if (currentthinker->function.acp1)
+		currentthinker->function.acp1 (currentthinker);
+	}
+	currentthinker = currentthinker->next;
+    }
+}
+
+
+
+//
+// P_Ticker
+//
+
+void P_Ticker (void)
+{
+    int		i;
+
+    // run the tic
+    if (paused)
+	return;
+		
+    // pause if in menu and at least one tic has been run
+    if ( !netgame
+	 && menuactive
+	 && !demoplayback
+	 && players[consoleplayer].viewz != 1)
+    {
+	return;
+    }
+    
+		
+    P_AICoop_BuildCmd ();	// AI co-op companion: fill players[1].cmd first
+
+    for (i=0 ; i<MAXPLAYERS ; i++)
+	if (playeringame[i] && players[i].mo)	// mo guard: an in-game slot with no body
+	    P_PlayerThink (&players[i]);	// (e.g. buddy on a P2_Start-less map) would crash
+			
+    P_AI_Ticker ();		// LLM AI Director: poll orders, age timers
+    if (!demoplayback)		// keep demo playback (incl. the title-screen attract demos)
+	P_Director_Ticker ();	// vanilla: the L4D director's spawns would desync a recorded demo
+    P_MorphTicker ();		// (M) age morph timers; restore expired morphs
+    RevMarine_Ticker ();	// (G) revived marines heal +1 HP/sec up to 100
+    P_Buddy_AbilityTicker ();	// BUDDYDEF `ability`: the buddy's special power
+
+    P_RunThinkers ();
+    P_UpdateSpecials ();
+    P_RespawnSpecials ();
+
+    // for par times
+    leveltime++;	
+}

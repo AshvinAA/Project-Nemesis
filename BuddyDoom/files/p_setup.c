@@ -1,0 +1,1412 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	Do all the WAD I/O, get map description,
+//	set up initial state and misc. LUTs.
+//
+//-----------------------------------------------------------------------------
+
+static const char
+rcsid[] = "$Id: p_setup.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
+
+
+#include <math.h>
+#include <limits.h>
+#include <stdlib.h>			// free() for the inflated-node buffer -- declared so the
+					// 64-bit pointer arg isn't truncated to int (LLP64)
+
+#include "z_zone.h"
+
+#include "m_swap.h"
+#include "m_bbox.h"
+
+#include "g_game.h"
+
+#include "i_system.h"
+#include "w_wad.h"
+
+#include "doomdef.h"
+#include "p_local.h"
+#include "p_udmf.h"			// UDMF (TEXTMAP) map support
+#include "p_ai_director.h"
+#include "p_ai_llm.h"
+#include "p_morph.h"
+#include "po_man.h"		// (X) polyobjects
+#include "p_acs.h"		// (X) ACS -- Hexen BEHAVIOR scripts		// (M) P_MorphReset -- clear morphs on level load
+
+#include "s_sound.h"
+
+#include "doomstat.h"
+
+
+void	P_SpawnMapThing (mapthing_t*	mthing);
+
+
+//
+// MAP related Lookup tables.
+// Store VERTEXES, LINEDEFS, SIDEDEFS, etc.
+//
+int		numvertexes;
+vertex_t*	vertexes;
+
+int		numsegs;
+seg_t*		segs;
+
+int		numsectors;
+sector_t*	sectors;
+
+int		numsubsectors;
+subsector_t*	subsectors;
+
+int		numnodes;
+node_t*		nodes;
+
+int		numlines;
+line_t*		lines;
+
+int		numsides;
+side_t*		sides;
+
+
+// BLOCKMAP
+// Created from axis aligned bounding box
+// of the map, a rectangular array of
+// blocks of size ...
+// Used to speed up collision detection
+// by spatial subdivision in 2D.
+//
+// Blockmap size.
+int		bmapwidth;
+int		bmapheight;	// size in mapblocks
+int*		blockmap;	// int: limit-removing blockmap (big maps + >32767 line indices)
+// offsets in blockmap are from here
+int*		blockmaplump;
+// origin of block map
+fixed_t		bmaporgx;
+fixed_t		bmaporgy;
+// for thing chains
+mobj_t**	blocklinks;		
+
+
+// REJECT
+// For fast sight rejection.
+// Speeds up enemy AI by skipping detailed
+//  LineOf Sight calculation.
+// Without special effect, this could be
+//  used as a PVS lookup as well.
+//
+byte*		rejectmatrix;
+
+
+// Maintain single and multi player starting spots.
+#define MAX_DEATHMATCH_STARTS	10
+
+mapthing_t	deathmatchstarts[MAX_DEATHMATCH_STARTS];
+mapthing_t*	deathmatch_p;
+mapthing_t	playerstarts[MAXPLAYERS];
+
+
+
+
+
+//
+// P_LoadVertexes
+//
+void P_LoadVertexes (int lump)
+{
+    byte*		data;
+    int			i;
+    mapvertex_t*	ml;
+    vertex_t*		li;
+
+    // Determine number of lumps:
+    //  total lump length / vertex record length.
+    numvertexes = W_LumpLength (lump) / sizeof(mapvertex_t);
+
+    // Allocate zone memory for buffer.
+    vertexes = Z_Malloc (numvertexes*sizeof(vertex_t),PU_LEVEL,0);	
+
+    // Load data into cache.
+    data = W_CacheLumpNum (lump,PU_STATIC);
+	
+    ml = (mapvertex_t *)data;
+    li = vertexes;
+
+    // Copy and convert vertex coordinates,
+    // internal representation as fixed.
+    for (i=0 ; i<numvertexes ; i++, li++, ml++)
+    {
+	li->x = SHORT(ml->x)<<FRACBITS;
+	li->y = SHORT(ml->y)<<FRACBITS;
+    }
+
+    // Free buffer memory.
+    Z_Free (data);
+}
+
+
+
+//
+// P_LoadSegs
+//
+void P_LoadSegs (int lump)
+{
+    byte*		data;
+    int			i;
+    mapseg_t*		ml;
+    seg_t*		li;
+    line_t*		ldef;
+    int			linedef;
+    int			side;
+	
+    numsegs = W_LumpLength (lump) / sizeof(mapseg_t);
+    segs = Z_Malloc (numsegs*sizeof(seg_t),PU_LEVEL,0);	
+    memset (segs, 0, numsegs*sizeof(seg_t));
+    data = W_CacheLumpNum (lump,PU_STATIC);
+	
+    ml = (mapseg_t *)data;
+    li = segs;
+    for (i=0 ; i<numsegs ; i++, li++, ml++)
+    {
+	li->v1 = &vertexes[SHORT(ml->v1)];
+	li->v2 = &vertexes[SHORT(ml->v2)];
+					
+	li->angle = (SHORT(ml->angle))<<16;
+	li->offset = (SHORT(ml->offset))<<16;
+	linedef = SHORT(ml->linedef);
+	ldef = &lines[linedef];
+	li->linedef = ldef;
+	side = SHORT(ml->side);
+	li->sidedef = &sides[ldef->sidenum[side]];
+	li->frontsector = sides[ldef->sidenum[side]].sector;
+	if (ldef-> flags & ML_TWOSIDED)
+	    li->backsector = sides[ldef->sidenum[side^1]].sector;
+	else
+	    li->backsector = 0;
+    }
+	
+    Z_Free (data);
+}
+
+
+//
+// P_LoadSubsectors
+//
+void P_LoadSubsectors (int lump)
+{
+    byte*		data;
+    int			i;
+    mapsubsector_t*	ms;
+    subsector_t*	ss;
+	
+    numsubsectors = W_LumpLength (lump) / sizeof(mapsubsector_t);
+    subsectors = Z_Malloc (numsubsectors*sizeof(subsector_t),PU_LEVEL,0);	
+    data = W_CacheLumpNum (lump,PU_STATIC);
+	
+    ms = (mapsubsector_t *)data;
+    memset (subsectors,0, numsubsectors*sizeof(subsector_t));
+    ss = subsectors;
+    
+    for (i=0 ; i<numsubsectors ; i++, ss++, ms++)
+    {
+	ss->numlines = SHORT(ms->numsegs);
+	ss->firstline = SHORT(ms->firstseg);
+    }
+	
+    Z_Free (data);
+}
+
+
+
+//
+// P_LoadSectors
+//
+void P_LoadSectors (int lump)
+{
+    byte*		data;
+    int			i;
+    mapsector_t*	ms;
+    sector_t*		ss;
+	
+    numsectors = W_LumpLength (lump) / sizeof(mapsector_t);
+    sectors = Z_Malloc (numsectors*sizeof(sector_t),PU_LEVEL,0);	
+    memset (sectors, 0, numsectors*sizeof(sector_t));
+    data = W_CacheLumpNum (lump,PU_STATIC);
+	
+    ms = (mapsector_t *)data;
+    ss = sectors;
+    for (i=0 ; i<numsectors ; i++, ss++, ms++)
+    {
+	ss->floorheight = SHORT(ms->floorheight)<<FRACBITS;
+	ss->ceilingheight = SHORT(ms->ceilingheight)<<FRACBITS;
+	ss->floorpic = R_FlatNumForName(ms->floorpic);
+	ss->ceilingpic = R_FlatNumForName(ms->ceilingpic);
+	ss->lightlevel = SHORT(ms->lightlevel);
+	ss->special = SHORT(ms->special);
+	ss->tag = SHORT(ms->tag);
+	ss->thinglist = NULL;
+	ss->heightsec = -1;	// Boom 242: no transfer-height control sector unless set below
+	ss->floorlightsec = ss->ceilinglightsec = -1;	// Boom 213/261 light transfer: none
+	ss->sky = 0;		// Boom 271/272 sky transfer: none
+    }
+	
+    Z_Free (data);
+}
+
+
+// ZDBSP / Boom "extended nodes": when a map is built with extended nodes the NODES lump
+// starts with a 4-byte magic (SSECTORS + SEGS lumps are empty) and carries new vertices,
+// subsectors, segs and 32-bit nodes itself.  We handle the plain "XNOD" format and the
+// zlib-compressed "ZNOD" variant (ZDBSP `-z`, common in modern WADs) -- ZNOD is just XNOD
+// deflated, so we inflate then run the same parser.  (GL-node variants XGL*/ZGL* have a
+// different seg layout and are still not handled.)  Returns true if it consumed the lump.
+extern angle_t R_PointToAngle2 (fixed_t, fixed_t, fixed_t, fixed_t);
+
+static fixed_t P_SegOffset (fixed_t x1, fixed_t y1, fixed_t x2, fixed_t y2)
+{
+    double dx = (double)(x1 - x2) / FRACUNIT;
+    double dy = (double)(y1 - y2) / FRACUNIT;
+    return (fixed_t)(sqrt (dx*dx + dy*dy) * FRACUNIT);
+}
+
+// zlib inflate lives in w_inflate.c -- <zlib.h> can't be included here (it pulls in a
+// POSIX close() that clashes with p_spec.h's `close` enum).  Returns a malloc'd buffer.
+extern byte* W_InflateZlib (byte* src, unsigned srclen, unsigned* outlen);
+
+// Recognised extended/GL node containers.  All share the same outer layout
+// (verts, subsectors, segs, nodes); only the SEG record and (for XGL3) the NODE
+// geometry differ.  The Z* variants are just the X* body zlib-deflated.
+enum { EN_NONE, EN_XNOD, EN_XGLN, EN_XGL2, EN_XGL3 };
+
+boolean P_LoadNodes_Extended (int lump)
+{
+    byte*    data;
+    byte*    ibuf = NULL;		// inflated body for the compressed (Z*) variants
+    byte*    p;
+    unsigned origv, newv, i;
+    unsigned nsub, nseg, nnod;
+    int      fmt = EN_NONE;
+    boolean  compressed = false;
+    boolean  gl, wide_ld, xgl3;
+    const char* fmtname;
+
+    if (lump < 0 || W_LumpLength (lump) < 8) return false;
+    data = W_CacheLumpNum (lump, PU_STATIC);
+
+    // magic: X*=uncompressed, Z*=zlib-compressed body
+    if      (!memcmp (data, "XNOD", 4)) { fmt = EN_XNOD; }
+    else if (!memcmp (data, "ZNOD", 4)) { fmt = EN_XNOD; compressed = true; }
+    else if (!memcmp (data, "XGLN", 4)) { fmt = EN_XGLN; }
+    else if (!memcmp (data, "ZGLN", 4)) { fmt = EN_XGLN; compressed = true; }
+    else if (!memcmp (data, "XGL2", 4)) { fmt = EN_XGL2; }
+    else if (!memcmp (data, "ZGL2", 4)) { fmt = EN_XGL2; compressed = true; }
+    else if (!memcmp (data, "XGL3", 4)) { fmt = EN_XGL3; }
+    else if (!memcmp (data, "ZGL3", 4)) { fmt = EN_XGL3; compressed = true; }
+    else { Z_Free (data); return false; }
+
+    if (compressed)
+    {
+	unsigned ilen = 0;
+	ibuf = W_InflateZlib (data + 4, W_LumpLength (lump) - 4, &ilen);
+	if (!ibuf || ilen < 8) { free (ibuf); Z_Free (data); return false; }
+	p = ibuf;
+    }
+    else
+	p = data + 4;
+
+    gl      = (fmt != EN_XNOD);
+    wide_ld = (fmt == EN_XGL2 || fmt == EN_XGL3);	// 32-bit linedef index in the seg
+    xgl3    = (fmt == EN_XGL3);				// 32-bit fixed node partition geometry
+    fmtname = (fmt == EN_XNOD) ? "XNOD" : (fmt == EN_XGLN) ? "XGLN"
+	    : (fmt == EN_XGL2) ? "XGL2" : "XGL3";
+
+    #define RD32() ( p += 4, (unsigned)(p[-4] | (p[-3]<<8) | (p[-2]<<16) | ((unsigned)p[-1]<<24)) )
+    #define RD16() ( p += 2, (unsigned short)(p[-2] | (p[-1]<<8)) )
+
+    origv = RD32();  newv = RD32();
+
+    // --- vertices: keep the originals (already loaded), append the new ones ---
+    {
+	vertex_t* nv = Z_Malloc ((origv + newv) * sizeof(vertex_t), PU_LEVEL, 0);
+	memcpy (nv, vertexes, origv * sizeof(vertex_t));
+	for (i = 0; i < newv; i++) { nv[origv+i].x = (fixed_t) RD32(); nv[origv+i].y = (fixed_t) RD32(); }
+	vertexes = nv; numvertexes = origv + newv;
+    }
+
+    // --- subsectors: each stores only a seg count; firstline is the running total ---
+    nsub = RD32();
+    numsubsectors = nsub;
+    subsectors = Z_Malloc (nsub * sizeof(subsector_t), PU_LEVEL, 0);
+    memset (subsectors, 0, nsub * sizeof(subsector_t));
+    { unsigned first = 0;
+      for (i = 0; i < nsub; i++)
+      { int cnt = (int) RD32(); subsectors[i].firstline = first; subsectors[i].numlines = cnt; first += cnt; } }
+
+    // --- segs ---
+    nseg = RD32();
+    numsegs = nseg;
+    segs = Z_Malloc (nseg * sizeof(seg_t), PU_LEVEL, 0);
+    memset (segs, 0, nseg * sizeof(seg_t));
+
+    if (!gl)
+    {
+	// XNOD: explicit v1,v2 (32-bit), linedef (16), side (8).
+	for (i = 0; i < nseg; i++)
+	{
+	    seg_t* li = &segs[i];
+	    unsigned v1 = RD32(), v2 = RD32();
+	    int ld = RD16();
+	    int side = *p++;
+	    line_t* ldef;
+	    if (v1 >= (unsigned)numvertexes || v2 >= (unsigned)numvertexes || ld < 0 || ld >= numlines)
+		I_Error ("P_LoadNodes: %s seg %u out of range (v1=%u v2=%u line=%d)", fmtname, i, v1, v2, ld);
+	    ldef = &lines[ld];
+	    li->v1 = &vertexes[v1];
+	    li->v2 = &vertexes[v2];
+	    li->linedef = ldef;
+	    li->sidedef = &sides[ldef->sidenum[side]];
+	    li->frontsector = sides[ldef->sidenum[side]].sector;
+	    li->backsector = (ldef->flags & ML_TWOSIDED) ? sides[ldef->sidenum[side^1]].sector : 0;
+	    li->angle = R_PointToAngle2 (li->v1->x, li->v1->y, li->v2->x, li->v2->y);
+	    { vertex_t* vv = side ? ldef->v2 : ldef->v1;
+	      li->offset = P_SegOffset (li->v1->x, li->v1->y, vv->x, vv->y); }
+	}
+    }
+    else
+    {
+	// GL segs: ONE vertex (v1) per seg; v2 is the next seg's v1 within the same
+	// subsector (circular).  linedef==sentinel -> miniseg (no wall).  angle needs
+	// v2, so it's computed in a second per-subsector pass.
+	unsigned sentinel = wide_ld ? 0xFFFFFFFFu : 0xFFFFu;
+	unsigned ss;
+	for (ss = 0; ss < nsub; ss++)
+	{
+	    int first = subsectors[ss].firstline;
+	    int cnt   = subsectors[ss].numlines;
+	    int j;
+	    for (j = 0; j < cnt; j++)
+	    {
+		seg_t*   li = &segs[first + j];
+		unsigned v1 = RD32();
+		(void) RD32();					// partner seg -- unused
+		unsigned ld = wide_ld ? RD32() : RD16();
+		int      side = *p++;
+		if (v1 >= (unsigned)numvertexes)
+		    I_Error ("P_LoadNodes: %s seg %d vertex %u out of range", fmtname, first + j, v1);
+		li->v1 = &vertexes[v1];
+		segs[first + (j == 0 ? cnt - 1 : j - 1)].v2 = li->v1;	// back-patch prev v2
+		if (ld == sentinel)
+		{
+		    li->linedef = NULL; li->sidedef = NULL;		// miniseg
+		    li->frontsector = li->backsector = NULL;
+		    li->offset = 0;
+		}
+		else
+		{
+		    line_t* ldef;
+		    if (ld >= (unsigned)numlines)
+			I_Error ("P_LoadNodes: %s seg %d line %u out of range", fmtname, first + j, ld);
+		    ldef = &lines[ld];
+		    int sn  = ldef->sidenum[side];
+		    int sn2 = ldef->sidenum[side ^ 1];
+		    li->linedef = ldef;
+		    li->sidedef = (sn  >= 0) ? &sides[sn]  : NULL;
+		    li->frontsector = (sn >= 0) ? sides[sn].sector : NULL;
+		    li->backsector = ((ldef->flags & ML_TWOSIDED) && sn2 >= 0) ? sides[sn2].sector : NULL;
+		    { vertex_t* vv = side ? ldef->v2 : ldef->v1;
+		      li->offset = P_SegOffset (li->v1->x, li->v1->y, vv->x, vv->y); }
+		}
+	    }
+	    // 2nd pass: minisegs adopt the subsector's real sector; set angles (v2 known now).
+	    {
+		sector_t* ssec = NULL;
+		for (j = 0; j < cnt; j++)
+		    if (segs[first + j].frontsector) { ssec = segs[first + j].frontsector; break; }
+		for (j = 0; j < cnt; j++)
+		{
+		    seg_t* li = &segs[first + j];
+		    if (!li->linedef) { li->frontsector = li->backsector = ssec; }
+		    li->angle = R_PointToAngle2 (li->v1->x, li->v1->y, li->v2->x, li->v2->y);
+		}
+	    }
+	}
+    }
+
+    // --- nodes: XGL3 has 32-bit fixed partition geometry; all others 16-bit shorts ---
+    nnod = RD32();
+    numnodes = nnod;
+    nodes = Z_Malloc (nnod * sizeof(node_t), PU_LEVEL, 0);
+    for (i = 0; i < nnod; i++)
+    {
+	node_t* no = &nodes[i]; int j, k;
+	if (xgl3)
+	{
+	    no->x = (fixed_t) RD32(); no->y = (fixed_t) RD32();
+	    no->dx = (fixed_t) RD32(); no->dy = (fixed_t) RD32();
+	}
+	else
+	{
+	    no->x = ((short) RD16()) << FRACBITS; no->y = ((short) RD16()) << FRACBITS;
+	    no->dx = ((short) RD16()) << FRACBITS; no->dy = ((short) RD16()) << FRACBITS;
+	}
+	for (j = 0; j < 2; j++) for (k = 0; k < 4; k++) no->bbox[j][k] = ((short) RD16()) << FRACBITS;
+	for (j = 0; j < 2; j++) no->children[j] = (int) RD32();   // already bit-31 = subsector
+    }
+    #undef RD32
+    #undef RD16
+    free (ibuf);			// NULL for uncompressed -- free(NULL) is fine
+    Z_Free (data);
+    printf ("P_LoadNodes: extended (%s%s) nodes -- %u verts, %u ssectors, %u segs, %u nodes\n",
+	    compressed ? "compressed " : "", fmtname, origv + newv, nsub, nseg, nnod);
+    return true;
+}
+
+//
+// P_LoadNodes
+//
+void P_LoadNodes (int lump)
+{
+    byte*	data;
+    int		i;
+    int		j;
+    int		k;
+    mapnode_t*	mn;
+    node_t*	no;
+	
+    numnodes = W_LumpLength (lump) / sizeof(mapnode_t);
+    nodes = Z_Malloc (numnodes*sizeof(node_t),PU_LEVEL,0);	
+    data = W_CacheLumpNum (lump,PU_STATIC);
+	
+    mn = (mapnode_t *)data;
+    no = nodes;
+    
+    for (i=0 ; i<numnodes ; i++, no++, mn++)
+    {
+	no->x = SHORT(mn->x)<<FRACBITS;
+	no->y = SHORT(mn->y)<<FRACBITS;
+	no->dx = SHORT(mn->dx)<<FRACBITS;
+	no->dy = SHORT(mn->dy)<<FRACBITS;
+	for (j=0 ; j<2 ; j++)
+	{
+	    unsigned short raw = (unsigned short) SHORT(mn->children[j]);
+	    no->children[j] = (raw & NF_SUBSECTOR_16)
+			     ? (NF_SUBSECTOR | (raw & ~NF_SUBSECTOR_16)) : raw;
+	    for (k=0 ; k<4 ; k++)
+		no->bbox[j][k] = SHORT(mn->bbox[j][k])<<FRACBITS;
+	}
+    }
+	
+    Z_Free (data);
+}
+
+
+//
+// Set per level by P_SetupLevel: this map uses the HEXEN binary format -- 16-byte
+// LINEDEFS (ACS special byte + 5 args, no tag) and 20-byte THINGS (TID + spawn
+// height), marked by a BEHAVIOR lump.  DOOM/Boom/UDMF maps leave it 0.
+extern mobj_t*	P_LastMapThingMobj;	// p_mobj.c -- the mobj the last P_SpawnMapThing made
+
+int	hexen_map_format = 0;
+
+// True if some mobjtype claims this Hexen map-thing number.  Used to decide
+// whether a Hexen THINGS record can be spawned at all -- see P_LoadThings.
+static boolean P_HexenEdnumKnown (int ednum)
+{
+    extern mobjinfo_t*	mobjinfo;
+    extern int		num_mobjtypes;
+    int			i;
+
+    if (ednum <= 0) return false;
+    // ONLY the additive Hexen block may claim a Hexen map number.  Scanning every
+    // mobjtype let DOOM's own actors answer: Hexen thing 89 matched DOOM's
+    // MT_BOSSSPIT (ednum 89), so the Icon-of-Sin shooter spawned on a Hexen map and
+    // A_BrainSpit walked a braintargets list that is never filled there.  The block
+    // runs from the first Hexen monster to the start of the Strife reservations.
+    for (i = MT_XETTIN; i < MT_S_FIELDGUARD && i < num_mobjtypes; i++)
+	if (mobjinfo[i].doomednum == ednum)
+	    return true;
+    return false;
+}
+
+// P_LoadThings
+//
+void P_LoadThings (int lump)
+{
+    byte*		data;
+    int			i;
+    mapthing_t*		mt;
+    int			numthings;
+    boolean		spawn;
+	
+    data = W_CacheLumpNum (lump,PU_STATIC);
+    numthings = W_LumpLength (lump) / sizeof(mapthing_t);
+	
+    // Hexen-format maps store 20-byte THINGS (tid, x, y, height, angle, type,
+    // flags, special, args[5]) instead of DOOM's 10-byte records.  Read them into
+    // a DOOM mapthing_t so the whole spawn path below is untouched.
+    //
+    // The TID is now KEPT (stamped onto the spawned mobj below): Hexen's scripts
+    // address things by tag, not by position, so Thing_Spawn / Thing_Projectile /
+    // Thing_Activate and the rest are all no-ops without it.  The spawn height and
+    // the per-thing ACS special are still dropped.
+    if (hexen_map_format)
+    {
+	mapthing_t	conv;
+	const byte*	r = (const byte*) data;
+	int		nskipped = 0;
+	short		unmapped[64];
+	int		nunmapped = 0;
+	static po_spot_t pospots[POLY_MAXOBJS * 2];
+	int		npospots = 0;
+	numthings = W_LumpLength (lump) / 20;
+	for (i = 0 ; i < numthings ; i++, r += 20)
+	{
+	    conv.x       = (short)(r[2]  | (r[3]  << 8));
+	    conv.y       = (short)(r[4]  | (r[5]  << 8));
+	    conv.angle   = (short)(r[8]  | (r[9]  << 8));
+	    conv.type    = (short)(r[10] | (r[11] << 8));
+	    conv.options = (short)(r[12] | (r[13] << 8));
+	    // Hexen numbers its map things in its OWN space, unrelated to DOOM's, and
+	    // Hexen_SetMapEdnums() (below, hexen mode only) has retagged the ported
+	    // actors with those numbers.  Player starts 1-4 are shared by every
+	    // id-format game and always work.  Anything still unresolved is SKIPPED
+	    // rather than passed to P_SpawnMapThing, which would spawn whatever DOOM
+	    // actor happens to share the number -- Hexen thing 89 became DOOM's
+	    // Icon-of-Sin shooter, whose A_BrainSpit dereferenced a braintargets list
+	    // a Hexen map never fills and killed MAP02/MAP03.
+	    // Polyobj map things are not actors -- 3000 is where the cluster was drawn,
+	    // 3001/3002 where it belongs.  Collect them for PO_Init instead of trying
+	    // to spawn them.  Hexen puts the polyobj id in the ANGLE field.
+	    if (conv.type >= 3000 && conv.type <= 3002)
+	    {
+		if (npospots < POLY_MAXOBJS * 2)
+		{
+		    pospots[npospots].type = conv.type;
+		    pospots[npospots].id   = conv.angle;
+		    pospots[npospots].x    = conv.x;
+		    pospots[npospots].y    = conv.y;
+		    npospots++;
+		}
+	    }
+	    else if ((conv.type >= 1 && conv.type <= 4) || P_HexenEdnumKnown (conv.type))
+	    {
+		P_SpawnMapThing (&conv);
+		// Stamp the thing id on whatever that spawned.  P_SpawnMapThing has
+		// no room for it (mapthing_t is the 10-byte DOOM record, and it is
+		// read straight off disk for DOOM maps, so it cannot grow a field),
+		// so it hands the mobj back through P_LastMapThingMobj.
+		if (P_LastMapThingMobj)
+		    P_LastMapThingMobj->tid = (short)(r[0] | (r[1] << 8));
+	    }
+	    else
+	    {
+		// Record DISTINCT unmapped numbers, not one line per thing: a map
+		// places hundreds of the same torch, and what you need is which
+		// TYPES are missing, not how many copies of each.
+		int u;
+		for (u = 0; u < nunmapped; u++)
+		    if (unmapped[u] == conv.type) break;
+		if (u == nunmapped && nunmapped < 64) unmapped[nunmapped++] = conv.type;
+		nskipped++;
+	    }
+	}
+	PO_Init (pospots, npospots);		// place the polyobjects (step 1)
+	if (nunmapped)
+	{
+	    int u;
+	    printf ("P_SetupLevel: %d thing(s) skipped, %d unmapped Hexen type(s):",
+		    nskipped, nunmapped);
+	    for (u = 0; u < nunmapped; u++) printf (" %d", unmapped[u]);
+	    printf ("\n");
+	}
+	Z_Free (data);
+	return;
+    }
+
+    mt = (mapthing_t *)data;
+    for (i=0 ; i<numthings ; i++, mt++)
+    {
+	spawn = true;
+
+	// Do not spawn cool, new monsters if !commercial.  (Skipped in heretic_mode:
+	// Heretic doomednums 64/66/68 are the Knight/Gargoyle/Mummy, NOT DOOM2 monsters,
+	// and this gate's `break` would otherwise abort the whole THINGS loop.)
+	if ( gamemode != commercial && !heretic_mode)
+	{
+	    switch(mt->type)
+	    {
+	      case 68:	// Arachnotron
+	      case 64:	// Archvile
+	      case 88:	// Boss Brain
+	      case 89:	// Boss Shooter
+	      case 69:	// Hell Knight
+	      case 67:	// Mancubus
+	      case 71:	// Pain Elemental
+	      case 65:	// Former Human Commando
+	      case 66:	// Revenant
+	      case 84:	// Wolf SS
+		spawn = false;
+		break;
+	    }
+	}
+	if (spawn == false)
+	    break;
+
+	// Do spawn all other stuff. 
+	mt->x = SHORT(mt->x);
+	mt->y = SHORT(mt->y);
+	mt->angle = SHORT(mt->angle);
+	mt->type = SHORT(mt->type);
+	mt->options = SHORT(mt->options);
+	
+	P_SpawnMapThing (mt);
+    }
+	
+    Z_Free (data);
+}
+
+
+//
+// Raw sidedef top/bottom texture names, kept from P_LoadSideDefs so P_LoadLineDefs
+// can resolve ID24 music-change lines (whose texture name is a music lump, not a
+// real texture).  Allocated PU_LEVEL; consumed at the end of P_LoadLineDefs.
+// (P_LoadSideDefs runs before P_LoadLineDefs in P_SetupLevel.)
+static char (*sd_raw_top)[9];
+static char (*sd_raw_bot)[9];
+
+// P_LoadLineDefs
+// Also counts secret lines for intermissions.
+//
+void P_LoadLineDefs (int lump)
+{
+    byte*		data;
+    int			i;
+    maplinedef_t*	mld;
+    line_t*		ld;
+    vertex_t*		v1;
+    vertex_t*		v2;
+	
+    // Hexen-format LINEDEFS are 16 bytes (v1, v2, flags, special:BYTE, args[5],
+    // sidenum[2]) against DOOM's 14 (v1, v2, flags, special, tag, sidenum[2]).
+    // Reading one as the other is what walked off the end of the lump and
+    // access-violated on every hexen.wad level load.
+    numlines = W_LumpLength (lump) / (hexen_map_format ? 16 : (int)sizeof(maplinedef_t));
+    lines = Z_Malloc (numlines*sizeof(line_t),PU_LEVEL,0);
+    memset (lines, 0, numlines*sizeof(line_t));
+    data = W_CacheLumpNum (lump,PU_STATIC);
+
+    if (hexen_map_format)
+    {
+	const byte* r = (const byte*) data;
+	ld = lines;
+	for (i = 0 ; i < numlines ; i++, r += 16, ld++)
+	{
+	    ld->flags = (short)(r[4] | (r[5] << 8));
+	    // Hexen's special is a 1-byte ACS/line-type id with 5 args and NO tag.
+	    // Its numbering has nothing to do with DOOM's, so running it would fire
+	    // arbitrary unrelated DOOM specials.  Drop it: the level loads and renders,
+	    // and doors/scripts simply do nothing until there is an ACS layer.
+	    // Hexen's special is a 1-byte id with 5 args and no tag.  Keep both: the
+	    // ACS bridge (files/p_acs.c P_ExecuteLineSpecial) knows this numbering,
+	    // and dropping them is what left every Hexen level inert.  ld->tag stays
+	    // 0 -- Hexen tags things through the args, not a tag field.
+	    ld->special = r[6];
+	    ld->args[0] = r[7];  ld->args[1] = r[8];  ld->args[2] = r[9];
+	    ld->args[3] = r[10]; ld->args[4] = r[11];
+	    ld->tag     = 0;
+	    v1 = ld->v1 = &vertexes[(unsigned short)(r[0] | (r[1] << 8))];
+	    v2 = ld->v2 = &vertexes[(unsigned short)(r[2] | (r[3] << 8))];
+	    ld->dx = v2->x - v1->x;
+	    ld->dy = v2->y - v1->y;
+	    if (!ld->dx)      ld->slopetype = ST_VERTICAL;
+	    else if (!ld->dy) ld->slopetype = ST_HORIZONTAL;
+	    else ld->slopetype = (FixedDiv (ld->dy, ld->dx) > 0) ? ST_POSITIVE : ST_NEGATIVE;
+
+	    if (v1->x < v2->x) { ld->bbox[BOXLEFT] = v1->x; ld->bbox[BOXRIGHT] = v2->x; }
+	    else               { ld->bbox[BOXLEFT] = v2->x; ld->bbox[BOXRIGHT] = v1->x; }
+	    if (v1->y < v2->y) { ld->bbox[BOXBOTTOM] = v1->y; ld->bbox[BOXTOP] = v2->y; }
+	    else               { ld->bbox[BOXBOTTOM] = v2->y; ld->bbox[BOXTOP] = v1->y; }
+
+	    ld->sidenum[0] = (short)(r[12] | (r[13] << 8));
+	    ld->sidenum[1] = (short)(r[14] | (r[15] << 8));
+	    if (ld->sidenum[0] == (short)0xffff) ld->sidenum[0] = -1;
+	    if (ld->sidenum[1] == (short)0xffff) ld->sidenum[1] = -1;
+	    ld->frontsector = (ld->sidenum[0] != -1) ? sides[ld->sidenum[0]].sector : 0;
+	    ld->backsector  = (ld->sidenum[1] != -1) ? sides[ld->sidenum[1]].sector : 0;
+	}
+	Z_Free (data);
+	return;
+    }
+	
+    mld = (maplinedef_t *)data;
+    ld = lines;
+    for (i=0 ; i<numlines ; i++, mld++, ld++)
+    {
+	ld->flags = SHORT(mld->flags);
+	ld->special = SHORT(mld->special);
+	ld->tag = SHORT(mld->tag);
+	v1 = ld->v1 = &vertexes[SHORT(mld->v1)];
+	v2 = ld->v2 = &vertexes[SHORT(mld->v2)];
+	ld->dx = v2->x - v1->x;
+	ld->dy = v2->y - v1->y;
+	
+	if (!ld->dx)
+	    ld->slopetype = ST_VERTICAL;
+	else if (!ld->dy)
+	    ld->slopetype = ST_HORIZONTAL;
+	else
+	{
+	    if (FixedDiv (ld->dy , ld->dx) > 0)
+		ld->slopetype = ST_POSITIVE;
+	    else
+		ld->slopetype = ST_NEGATIVE;
+	}
+		
+	if (v1->x < v2->x)
+	{
+	    ld->bbox[BOXLEFT] = v1->x;
+	    ld->bbox[BOXRIGHT] = v2->x;
+	}
+	else
+	{
+	    ld->bbox[BOXLEFT] = v2->x;
+	    ld->bbox[BOXRIGHT] = v1->x;
+	}
+
+	if (v1->y < v2->y)
+	{
+	    ld->bbox[BOXBOTTOM] = v1->y;
+	    ld->bbox[BOXTOP] = v2->y;
+	}
+	else
+	{
+	    ld->bbox[BOXBOTTOM] = v2->y;
+	    ld->bbox[BOXTOP] = v1->y;
+	}
+
+	// Read sidenum UNSIGNED: 0xFFFF is the "no sidedef" sentinel (== -1); every other value
+	// is a valid index.  Reading it as a signed short (the old SHORT()) broke maps with more
+	// than 32767 sidedefs -- a high index came out NEGATIVE, slipped past the "== -1" test,
+	// and indexed sides[] out of bounds -> a NULL/garbage frontsector and a crash in
+	// P_GroupLines.  Common in ZDBSP/extended-node maps (e.g. Legacy of Rust MAP13).
+	{ unsigned short s0 = (unsigned short) SHORT(mld->sidenum[0]);
+	  unsigned short s1 = (unsigned short) SHORT(mld->sidenum[1]);
+	  ld->sidenum[0] = (s0 == 0xFFFF || s0 >= numsides) ? -1 : (int) s0;
+	  ld->sidenum[1] = (s1 == 0xFFFF || s1 >= numsides) ? -1 : (int) s1; }
+
+	if (ld->sidenum[0] == -1)
+	    ld->sidenum[0] = 0;  // Substitute dummy sidedef for missing right side
+
+	if (ld->sidenum[0] != -1)
+	    ld->frontsector = sides[ld->sidenum[0]].sector;
+	else
+	    ld->frontsector = 0;
+
+	if (ld->sidenum[1] != -1)
+	    ld->backsector = sides[ld->sidenum[1]].sector;
+	else
+	    ld->backsector = 0;
+
+	ld->tranlump = -1;	// Boom 260: opaque unless a 260 special says otherwise (below)
+	ld->frontmusic = ld->backmusic = -1;	// ID24 music-change: resolved below
+    }
+
+    // ID24 music-change lines (2057-2068, 2087-2098): the sidedef's texture NAME is a
+    // music lump (front = top of front side, back = bottom of back side).  Resolve it
+    // to a lump number now and clear the fake top texture so it doesn't render.
+    if (sd_raw_top)
+    {
+	line_t* ld = lines;
+	int i;
+	for (i = 0; i < numlines; i++, ld++)
+	{
+	    int sp = ld->special;
+	    if (!((sp >= 2057 && sp <= 2068) || (sp >= 2087 && sp <= 2098)))
+		continue;
+	    if (ld->sidenum[0] >= 0 && ld->sidenum[0] < numsides)
+	    {
+		ld->frontmusic = W_CheckNumForName (sd_raw_top[ld->sidenum[0]]);
+		sides[ld->sidenum[0]].toptexture = 0;
+	    }
+	    if (ld->sidenum[1] >= 0 && ld->sidenum[1] < numsides)
+		ld->backmusic = W_CheckNumForName (sd_raw_bot[ld->sidenum[1]]);
+	}
+    }
+    sd_raw_top = sd_raw_bot = NULL;	// PU_LEVEL memory is reclaimed at the next level load
+
+    // Boom 260 (killough 4/11/98): translucent 2S middle textures.  tag 0 -> just this linedef;
+    // tag N -> every linedef with that tag.  BuddyDoom uses the generated main_tranmap (tranlump 0).
+    {
+	line_t* ld = lines;
+	int i, j;
+	for (i = 0; i < numlines; i++, ld++)
+	    if (ld->special == 260)
+	    {
+		if (!ld->tag)
+		    ld->tranlump = 0;
+		else
+		    for (j = 0; j < numlines; j++)
+			if (lines[j].tag == ld->tag)
+			    lines[j].tranlump = 0;
+	    }
+    }
+
+    Z_Free (data);
+}
+
+
+//
+// P_LoadSideDefs
+//
+void P_LoadSideDefs (int lump)
+{
+    byte*		data;
+    int			i;
+    mapsidedef_t*	msd;
+    side_t*		sd;
+
+    numsides = W_LumpLength (lump) / sizeof(mapsidedef_t);
+    sides = Z_Malloc (numsides*sizeof(side_t),PU_LEVEL,0);
+    memset (sides, 0, numsides*sizeof(side_t));
+    data = W_CacheLumpNum (lump,PU_STATIC);
+
+    sd_raw_top = Z_Malloc (numsides * 9, PU_LEVEL, 0);
+    sd_raw_bot = Z_Malloc (numsides * 9, PU_LEVEL, 0);
+
+    msd = (mapsidedef_t *)data;
+    sd = sides;
+    for (i=0 ; i<numsides ; i++, msd++, sd++)
+    {
+	sd->textureoffset = SHORT(msd->textureoffset)<<FRACBITS;
+	sd->rowoffset = SHORT(msd->rowoffset)<<FRACBITS;
+	sd->toptexture = R_TextureNumForName(msd->toptexture);
+	sd->bottomtexture = R_TextureNumForName(msd->bottomtexture);
+	sd->midtexture = R_TextureNumForName(msd->midtexture);
+	sd->sector = &sectors[SHORT(msd->sector)];
+	// keep the raw names for the ID24 music-line resolution pass
+	memcpy (sd_raw_top[i], msd->toptexture, 8);    sd_raw_top[i][8] = 0;
+	memcpy (sd_raw_bot[i], msd->bottomtexture, 8); sd_raw_bot[i][8] = 0;
+    }
+
+    Z_Free (data);
+}
+
+
+// P_CreateBlockMap (jff/killough, via MBF/PrBoom/Woof): build a fresh blockmap from the
+// linedefs.  Needed when the WAD blockmap is absent or too big for the 16-bit on-disk
+// offsets (a blockmap over 65535 shorts, e.g. Legacy of Rust MAP13's 76134, can't be
+// addressed, which crashed collision).  Produces an int blockmaplump (no size limit).
+#define blkshift  7			// cell size = 128 map units
+#define blkmask   ((1<<blkshift)-1)
+#define blkmargin 0
+
+typedef struct linelist_s { long num; struct linelist_s* next; } linelist_t;
+
+// `done[blockno]` is a GENERATION stamp, not a 0/1 flag: it holds the `blockdone_gen`
+// of the line currently being distributed, so "already added this line to this block"
+// is a single compare with no per-line array clear.  (Was memset(blockdone, NBlocks)
+// once per linedef -> O(numlines * NBlocks); a big limit-removing map turned that into
+// seconds of memset at load.  Woof/DSDA/PrBoom+ use exactly this generation trick.)
+// A file-static gen keeps every call site untouched -- the caller just bumps it per line.
+static int blockdone_gen;
+static void AddBlockLine (linelist_t** lists, int* count, int* done, int blockno, long lineno)
+{
+    linelist_t* l;
+    if (done[blockno] == blockdone_gen) return;
+    l = Z_Malloc (sizeof(linelist_t), PU_STATIC, 0);
+    l->num = lineno;
+    l->next = lists[blockno];
+    lists[blockno] = l;
+    count[blockno]++;
+    done[blockno] = blockdone_gen;
+}
+
+static void P_CreateBlockMap (void)
+{
+    int		xorg, yorg, nrows, ncols, NBlocks, i, j;
+    long	linetotal = 0;
+    linelist_t** blocklists;
+    int*	blockcount;
+    int*	blockdone;
+    int		map_minx = INT_MAX, map_miny = INT_MAX, map_maxx = INT_MIN, map_maxy = INT_MIN;
+
+    if (numvertexes)
+    { map_minx = map_maxx = vertexes[0].x; map_miny = map_maxy = vertexes[0].y; }
+    for (i = 0; i < numvertexes; i++)
+    {
+	fixed_t t;
+	if ((t = vertexes[i].x) < map_minx) map_minx = t; else if (t > map_maxx) map_maxx = t;
+	if ((t = vertexes[i].y) < map_miny) map_miny = t; else if (t > map_maxy) map_maxy = t;
+    }
+    map_minx >>= FRACBITS; map_maxx >>= FRACBITS; map_miny >>= FRACBITS; map_maxy >>= FRACBITS;
+
+    xorg = map_minx - blkmargin;
+    yorg = map_miny - blkmargin;
+    ncols = (map_maxx + blkmargin - xorg + 1 + blkmask) >> blkshift;
+    nrows = (map_maxy + blkmargin - yorg + 1 + blkmask) >> blkshift;
+    NBlocks = ncols * nrows;
+
+    blocklists = Z_Malloc (NBlocks * sizeof(*blocklists), PU_STATIC, 0);
+    blockcount = Z_Malloc (NBlocks * sizeof(*blockcount), PU_STATIC, 0);
+    blockdone  = Z_Malloc (NBlocks * sizeof(*blockdone),  PU_STATIC, 0);
+    memset (blocklists, 0, NBlocks * sizeof(*blocklists));
+    memset (blockcount, 0, NBlocks * sizeof(*blockcount));
+    memset (blockdone,  0, NBlocks * sizeof(*blockdone));	// gen stamps: 0 = "no line yet" (gens start at 1)
+
+    for (i = 0; i < NBlocks; i++)
+    { blocklists[i] = Z_Malloc (sizeof(linelist_t), PU_STATIC, 0);
+      blocklists[i]->num = -1; blocklists[i]->next = NULL; blockcount[i]++; }
+
+    for (i = 0; i < numlines; i++)
+    {
+	int x1 = lines[i].v1->x >> FRACBITS, y1 = lines[i].v1->y >> FRACBITS;
+	int x2 = lines[i].v2->x >> FRACBITS, y2 = lines[i].v2->y >> FRACBITS;
+	int dx = x2 - x1, dy = y2 - y1;
+	int vert = !dx, horiz = !dy;
+	int spos = (dx ^ dy) > 0, sneg = (dx ^ dy) < 0;
+	int bx, by;
+	int minx = x1 > x2 ? x2 : x1, maxx = x1 > x2 ? x1 : x2;
+	int miny = y1 > y2 ? y2 : y1, maxy = y1 > y2 ? y1 : y2;
+
+	blockdone_gen = i + 1;		// new generation for this line (gens are 1..numlines)
+
+	bx = (x1 - xorg) >> blkshift; by = (y1 - yorg) >> blkshift;
+	AddBlockLine (blocklists, blockcount, blockdone, by * ncols + bx, i);
+	bx = (x2 - xorg) >> blkshift; by = (y2 - yorg) >> blkshift;
+	AddBlockLine (blocklists, blockcount, blockdone, by * ncols + bx, i);
+
+	if (!vert)		// intersect with each column's left edge
+	  for (j = 0; j < ncols; j++)
+	  {
+	    int x = xorg + (j << blkshift);
+	    int y = (dy * (x - x1)) / dx + y1;
+	    int yb = (y - yorg) >> blkshift, yp = (y - yorg) & blkmask;
+	    if (yb < 0 || yb > nrows - 1 || x < minx || x > maxx) continue;
+	    AddBlockLine (blocklists, blockcount, blockdone, ncols * yb + j, i);
+	    if (yp == 0)
+	    {
+	      if (sneg)      { if (yb>0 && miny<y) AddBlockLine(blocklists,blockcount,blockdone,ncols*(yb-1)+j,i);
+			       if (j>0 && minx<x)  AddBlockLine(blocklists,blockcount,blockdone,ncols*yb+j-1,i); }
+	      else if (horiz){ if (yb>0 && miny<y) AddBlockLine(blocklists,blockcount,blockdone,ncols*(yb-1)+j,i); }
+	      else if (spos) { if (yb>0 && j>0 && miny<y) AddBlockLine(blocklists,blockcount,blockdone,ncols*(yb-1)+j-1,i); }
+	    }
+	    else if (j>0 && minx<x) AddBlockLine (blocklists, blockcount, blockdone, ncols*yb+j-1, i);
+	  }
+
+	if (!horiz)		// intersect with each row's bottom edge
+	  for (j = 0; j < nrows; j++)
+	  {
+	    int y = yorg + (j << blkshift);
+	    int x = (dx * (y - y1)) / dy + x1;
+	    int xb = (x - xorg) >> blkshift, xp = (x - xorg) & blkmask;
+	    if (xb < 0 || xb > ncols - 1 || y < miny || y > maxy) continue;
+	    AddBlockLine (blocklists, blockcount, blockdone, ncols * j + xb, i);
+	    if (xp == 0)
+	    {
+	      if (sneg)      { if (j>0 && miny<y)  AddBlockLine(blocklists,blockcount,blockdone,ncols*(j-1)+xb,i);
+			       if (xb>0 && minx<x) AddBlockLine(blocklists,blockcount,blockdone,ncols*j+xb-1,i); }
+	      else if (vert) { if (j>0 && miny<y)  AddBlockLine(blocklists,blockcount,blockdone,ncols*(j-1)+xb,i); }
+	      else if (spos) { if (xb>0 && j>0 && miny<y) AddBlockLine(blocklists,blockcount,blockdone,ncols*(j-1)+xb-1,i); }
+	    }
+	    else if (j>0 && miny<y) AddBlockLine (blocklists, blockcount, blockdone, ncols*(j-1)+xb, i);
+	  }
+    }
+
+    blockdone_gen = numlines + 1;	// distinct from every per-line gen; each block visited once here
+    for (i = 0, linetotal = 0; i < NBlocks; i++)
+    { AddBlockLine (blocklists, blockcount, blockdone, i, 0); linetotal += blockcount[i]; }
+
+    blockmaplump = Z_Malloc (sizeof(*blockmaplump) * (4 + NBlocks + linetotal), PU_LEVEL, 0);
+    blockmaplump[0] = bmaporgx = xorg << FRACBITS;
+    blockmaplump[1] = bmaporgy = yorg << FRACBITS;
+    blockmaplump[2] = bmapwidth  = ncols;
+    blockmaplump[3] = bmapheight = nrows;
+
+    for (i = 0; i < NBlocks; i++)
+    {
+	linelist_t* bl = blocklists[i];
+	long offs = blockmaplump[4+i] = (i ? blockmaplump[4+i-1] : 4 + NBlocks) + (i ? blockcount[i-1] : 0);
+	while (bl) { linelist_t* tmp = bl->next; blockmaplump[offs++] = bl->num; Z_Free (bl); bl = tmp; }
+    }
+    blockmap = blockmaplump + 4;
+
+    Z_Free (blocklists); Z_Free (blockcount); Z_Free (blockdone);
+    printf ("P_LoadBlockMap: rebuilt blockmap (%d x %d cells)\n", ncols, nrows);
+}
+
+//
+// P_LoadBlockMap
+//
+void P_LoadBlockMap (int lump)
+{
+    int		i;
+    int		count = (lump >= 0) ? W_LumpLength (lump)/2 : 0;	// shorts in the on-disk lump
+
+    // Rebuild if the WAD blockmap is missing, degenerate, or too big for its 16-bit offsets
+    // (over 65535 shorts -> some list offset can't be represented, so collision is broken).
+    if (lump < 0 || count < 4 || count > 0x10000 || M_CheckParm ("-blockmap"))
+    {
+	P_CreateBlockMap ();
+    }
+    else
+    {
+	short* wad = W_CacheLumpNum (lump, PU_LEVEL);
+	blockmaplump = Z_Malloc (count * sizeof(*blockmaplump), PU_LEVEL, 0);
+	blockmaplump[0] = SHORT (wad[0]);			// origin x (signed)
+	blockmaplump[1] = SHORT (wad[1]);			// origin y (signed)
+	blockmaplump[2] = (int)(unsigned short) SHORT (wad[2]);	// width  (unsigned)
+	blockmaplump[3] = (int)(unsigned short) SHORT (wad[3]);	// height (unsigned)
+	for (i = 4; i < count; i++)
+	{
+	    short t = SHORT (wad[i]);				// offsets + line indices are UNSIGNED;
+	    blockmaplump[i] = (t == -1) ? -1 : (int)(unsigned short) t;	// keep the 0xFFFF list terminator as -1
+	}
+	Z_Free (wad);
+	blockmap = blockmaplump + 4;
+	bmaporgx = blockmaplump[0] << FRACBITS;
+	bmaporgy = blockmaplump[1] << FRACBITS;
+	bmapwidth  = blockmaplump[2];
+	bmapheight = blockmaplump[3];
+    }
+
+    // clear out mobj chains
+    count = sizeof(*blocklinks) * bmapwidth * bmapheight;
+    blocklinks = Z_Malloc (count, PU_LEVEL, 0);
+    memset (blocklinks, 0, count);
+}
+
+
+
+//
+// P_GroupLines
+// Builds sector line lists and subsector sector numbers.
+// Finds block bounding boxes for sectors.
+//
+void P_GroupLines (void)
+{
+    line_t**		linebuffer;
+    int			i;
+    int			j;
+    int			total;
+    line_t*		li;
+    sector_t*		sector;
+    subsector_t*	ss;
+    seg_t*		seg;
+    fixed_t		bbox[4];
+    int			block;
+	
+    // look up sector number for each subsector.  With GL nodes the first seg can be
+    // a miniseg (sidedef==NULL), so scan for the first seg that has a real sidedef.
+    ss = subsectors;
+    for (i=0 ; i<numsubsectors ; i++, ss++)
+    {
+	int s;
+	ss->sector = NULL;
+	for (s = 0; s < ss->numlines; s++)
+	{
+	    seg = &segs[ss->firstline + s];
+	    if (seg->sidedef) { ss->sector = seg->sidedef->sector; break; }
+	}
+	// Fallback (all-miniseg subsector, shouldn't happen): use the seg's frontsector.
+	if (!ss->sector && ss->numlines > 0)
+	    ss->sector = segs[ss->firstline].frontsector;
+    }
+
+    // count number of lines in each sector
+    li = lines;
+    total = 0;
+    for (i=0 ; i<numlines ; i++, li++)
+    {
+	total++;
+	li->frontsector->linecount++;
+
+	if (li->backsector && li->backsector != li->frontsector)
+	{
+	    li->backsector->linecount++;
+	    total++;
+	}
+    }
+	
+    // build line tables for each sector
+    // (one line_t* per entry -- sizeof(*linebuffer), not 4, on 64-bit)
+    linebuffer = Z_Malloc (total*sizeof(*linebuffer), PU_LEVEL, 0);
+    sector = sectors;
+    for (i=0 ; i<numsectors ; i++, sector++)
+    {
+	M_ClearBox (bbox);
+	sector->lines = linebuffer;
+	li = lines;
+	for (j=0 ; j<numlines ; j++, li++)
+	{
+	    if (li->frontsector == sector || li->backsector == sector)
+	    {
+		*linebuffer++ = li;
+		M_AddToBox (bbox, li->v1->x, li->v1->y);
+		M_AddToBox (bbox, li->v2->x, li->v2->y);
+	    }
+	}
+	if (linebuffer - sector->lines != sector->linecount)
+	    I_Error ("P_GroupLines: miscounted");
+			
+	// set the degenmobj_t to the middle of the bounding box
+	sector->soundorg.x = (bbox[BOXRIGHT]+bbox[BOXLEFT])/2;
+	sector->soundorg.y = (bbox[BOXTOP]+bbox[BOXBOTTOM])/2;
+		
+	// adjust bounding box to map blocks
+	block = (bbox[BOXTOP]-bmaporgy+MAXRADIUS)>>MAPBLOCKSHIFT;
+	block = block >= bmapheight ? bmapheight-1 : block;
+	sector->blockbox[BOXTOP]=block;
+
+	block = (bbox[BOXBOTTOM]-bmaporgy-MAXRADIUS)>>MAPBLOCKSHIFT;
+	block = block < 0 ? 0 : block;
+	sector->blockbox[BOXBOTTOM]=block;
+
+	block = (bbox[BOXRIGHT]-bmaporgx+MAXRADIUS)>>MAPBLOCKSHIFT;
+	block = block >= bmapwidth ? bmapwidth-1 : block;
+	sector->blockbox[BOXRIGHT]=block;
+
+	block = (bbox[BOXLEFT]-bmaporgx-MAXRADIUS)>>MAPBLOCKSHIFT;
+	block = block < 0 ? 0 : block;
+	sector->blockbox[BOXLEFT]=block;
+    }
+	
+}
+
+
+// UDMF maps usually ship no REJECT lump (and if they do it may be a stub).  A
+// missing/short reject would make P_CheckSight read out of bounds, so allocate a
+// zero-filled matrix (0 == "every sector pair can see each other") of the correct
+// size when the lump is absent or too small.
+void P_LoadReject_UDMF (int lump)
+{
+    int need = (numsectors * numsectors + 7) / 8;		// bits -> bytes, rounded up
+    if (lump >= 0 && W_LumpLength (lump) >= need)
+    {
+	rejectmatrix = W_CacheLumpNum (lump, PU_LEVEL);
+    }
+    else
+    {
+	rejectmatrix = Z_Malloc (need, PU_LEVEL, 0);
+	memset (rejectmatrix, 0, need);
+    }
+}
+
+//
+// P_SetupLevel
+//
+void
+P_SetupLevel
+( int		episode,
+  int		map,
+  int		playermask,
+  skill_t	skill)
+{
+    int		i;
+    char	lumpname[9];
+    int		lumpnum;
+    boolean	udmf_map;
+
+    totalkills = totalitems = totalsecret = wminfo.maxfrags = 0;
+    wminfo.partime = 180;
+    for (i=0 ; i<MAXPLAYERS ; i++)
+    {
+	players[i].killcount = players[i].secretcount 
+	    = players[i].itemcount = 0;
+    }
+
+    // Initial height of PointOfView
+    // will be set by player think.
+    players[consoleplayer].viewz = 1; 
+
+    // Make sure all sounds are stopped before Z_FreeTags.
+    S_Start ();			
+
+    
+#if 0 // UNUSED
+    if (debugfile)
+    {
+	Z_FreeTags (PU_LEVEL, MAXINT);
+	Z_FileDumpHeap (debugfile);
+    }
+    else
+#endif
+	Z_FreeTags (PU_LEVEL, PU_PURGELEVEL-1);
+
+    // (X) Polyobjects are PU_LEVEL, so the free above just invalidated them.  Drop
+    // the pointers NOW rather than in PO_Init: PO_Init only runs on Hexen-format
+    // maps, so on any other map -- or on the next map after a Hexen one -- the
+    // globals would still hold freed addresses, and the blockmap iterator reads
+    // PolyBlockMap on every line check in every game.
+    PO_ClearLevel ();
+
+    // UNUSED W_Profile ();
+    P_InitThinkers ();
+
+    // if working with a devlopment map, reload it
+    W_Reload ();			
+	   
+    // find map name
+    if ( gamemode == commercial)
+    {
+	if (map<10)
+	    sprintf (lumpname,"map0%i", map);
+	else
+	    sprintf (lumpname,"map%i", map);
+    }
+    else
+    {
+	lumpname[0] = 'E';
+	lumpname[1] = '0' + episode;
+	lumpname[2] = 'M';
+	lumpname[3] = '0' + map;
+	lumpname[4] = 0;
+    }
+
+    lumpnum = W_GetNumForName (lumpname);
+	
+    leveltime = 0;
+
+    // UDMF (TEXTMAP) map?  Parse the text geometry + GL/ZDBSP nodes instead of the
+    // eight binary lumps.  udmf_map is remembered for the THINGS load below.
+    udmf_map = UDMF_IsMap (lumpnum);
+
+    // Hexen-format map?  The marker is a BEHAVIOR lump (compiled ACS) right after
+    // BLOCKMAP.  Detect it per-map rather than from the IWAD, since a PWAD can ship
+    // Hexen-format maps for any game -- and it decides how wide the LINEDEFS and
+    // THINGS records are (16/20 bytes vs DOOM's 14/10).
+    hexen_map_format = 0;
+    if (!udmf_map && lumpnum + ML_BLOCKMAP + 1 < numlumps
+	&& !strncasecmp (lumpinfo[lumpnum + ML_BLOCKMAP + 1].name, "BEHAVIOR", 8))
+    {
+	hexen_map_format = 1;
+	printf ("P_SetupLevel: %s is a Hexen-format map (BEHAVIOR present)\n", lumpname);
+    }
+
+    if (udmf_map)
+    {
+	UDMF_LoadMap (lumpnum);				// vertexes/sectors/sides/lines + find sub-lumps
+	if (!P_LoadNodes_Extended (UDMF_ZnodesLump ()))	// GL/ZDBSP nodes from the ZNODES lump
+	    I_Error ("UDMF map \"%s\": missing or unsupported ZNODES "
+		     "(need XGL3/XGL2/XGLN or XNOD extended nodes).", lumpname);
+	P_LoadBlockMap (UDMF_BlockmapLump ());		// -1 (usually) -> rebuilt from linedefs
+	P_LoadReject_UDMF (UDMF_RejectLump ());
+    }
+    else
+    {
+	// note: most of this ordering is important
+	P_LoadVertexes (lumpnum+ML_VERTEXES);
+	P_LoadSectors (lumpnum+ML_SECTORS);
+	P_LoadSideDefs (lumpnum+ML_SIDEDEFS);
+
+	P_LoadLineDefs (lumpnum+ML_LINEDEFS);
+	if (!P_LoadNodes_Extended (lumpnum+ML_NODES))   // Boom/ZDBSP XNOD -> loads verts+ssectors+segs+nodes
+	{
+	    P_LoadSubsectors (lumpnum+ML_SSECTORS);
+	    P_LoadNodes (lumpnum+ML_NODES);
+	    P_LoadSegs (lumpnum+ML_SEGS);
+	}
+
+	// AFTER vertexes/linedefs (+ extended nodes): P_LoadBlockMap may need to REBUILD the
+	// blockmap from the linedef geometry (WAD blockmap missing or too big), which reads
+	// lines[]/vertexes[] -- so it can't run first like the stock order did.
+	P_LoadBlockMap (lumpnum+ML_BLOCKMAP);
+
+	rejectmatrix = W_CacheLumpNum (lumpnum+ML_REJECT,PU_LEVEL);
+    }
+    P_GroupLines ();
+
+    bodyqueslot = 0;
+    deathmatch_p = deathmatchstarts;
+
+    // Co-op buddy: before P_LoadThings reads THINGS, drop any stale mobj/flags
+    // for the buddy slot.  Without this, playerstarts[] / players[].mo retain
+    // values from the previous map's load (PWAD overlay of an E?M? keeps the
+    // IWAD's Player_2_Start intact even though the PWAD has no P2 thing), which
+    // would mask a missing P2_Start.  Reset here so P_AICoop_VerifySpawn can
+    // reliably distinguish "this map had a P2_Start" (mo != NULL after spawn)
+    // from "this map had no P2_Start" (mo == NULL because we just nulled it
+    // and P_LoadThings didn't set it).
+    P_AICoop_ResetSlot ();
+
+    if (udmf_map)
+	UDMF_LoadThings ();
+    else
+	// ACS: the map's BEHAVIOR lump.  After the geometry (OPEN scripts can touch
+	// sectors immediately) and before the things spawn.
+	// Hexen-format map: hand the ported Hexen actors their real map-thing
+	// numbers before THINGS are read (off such a map they stay -1 so they cannot
+	// shadow DOOM/Heretic things).
+	if (hexen_map_format) Hexen_SetMapEdnums ();
+	P_LoadACScripts (hexen_map_format ? lumpnum + ML_BLOCKMAP + 1 : -1);
+	P_LoadThings (lumpnum+ML_THINGS);
+    
+    // if deathmatch, randomly spawn the active players
+    if (deathmatch)
+    {
+	for (i=0 ; i<MAXPLAYERS ; i++)
+	    if (playeringame[i])
+	    {
+		players[i].mo = NULL;
+		G_DeathMatchSpawnPlayer (i);
+	    }
+			
+    }
+
+    // clear special respawning que
+    iquehead = iquetail = 0;		
+	
+    // set up world state
+    P_SpawnSpecials ();
+
+    // LLM AI Director: drop any monster directives from the previous level
+    P_AI_Reset ();
+    P_Director_Reset ();		// reset L4D intensity/FSM for the new level
+    P_MorphReset ();			// (M) drop any morphs from the previous level
+
+    // Co-op buddy: -coop/-aicoop requested Player 2 to spawn on this map.
+    // If the map has no Player_2_Start (only Player_1_Start), the buddy has
+    // nowhere to spawn -- emit a one-shot warning and disable it for this
+    // level instead of silently failing.
+    P_AICoop_VerifySpawn ();
+
+    // build subsector connect matrix
+    //	UNUSED P_ConnectSubsectors ();
+
+    // preload graphics
+    if (precache)
+	R_PrecacheLevel ();
+
+    //printf ("free memory: 0x%x\n", Z_FreeMemory());
+
+}
+
+
+
+//
+// P_Init
+//
+void P_Init (void)
+{
+    P_InitSwitchList ();
+    P_InitPicAnims ();
+    R_InitSprites (sprnames);
+}
+
+
+

@@ -1,0 +1,1328 @@
+// Emacs style mode select   -*- C++ -*- 
+//-----------------------------------------------------------------------------
+//
+// $Id:$
+//
+// Copyright (C) 1993-1996 by id Software, Inc.
+//
+// This source is available for distribution and/or modification
+// only under the terms of the DOOM Source Code License as
+// published by id Software. All rights reserved.
+//
+// The source is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
+// for more details.
+//
+// $Log:$
+//
+// DESCRIPTION:
+//	Handling interactions (i.e., collisions).
+//
+//-----------------------------------------------------------------------------
+
+
+static const char
+rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
+
+
+// Data.
+#include "doomdef.h"
+#include "dstrings.h"
+#include "dstrings_bex.h"
+#include "sounds.h"
+
+#include "doomstat.h"
+
+#include "m_random.h"
+#include "i_system.h"
+
+#include "am_map.h"
+
+#include "p_local.h"
+#include "p_buddydef.h"	// P_Buddy_BodyPainchance / P_Buddy_DamageScale
+#include "p_ai_coop.h"		// P_AICoop_IsBuddy -- buddy must not pocket keys
+#include "p_morph.h"		// (M) P_MorphMonster -- Morph Ovum egg morphs on impact
+
+// (M) Morph Ovum: how long a monster stays a chicken (crispy CHICKENTICS).
+#define CHICKENTICS	(40*TICRATE)
+#include "p_ai_director.h"	// L4D stress director (-director)
+#include "p_invent.h"		// (J) artifact inventory pickups/use
+#include "p_inv_heretic.h"	// (H) Heretic artifact pickups
+#include "heretic_items.h"	// (H) map-placeable Heretic item pickups
+#include "hexen_items.h"	// (X) map-placeable Hexen item/puzzle pickups
+
+#include "s_sound.h"
+
+#ifdef __GNUG__
+#pragma implementation "p_inter.h"
+#endif
+#include "p_inter.h"
+
+
+#define BONUSADD	6
+
+// -nofriendlyfire (alias -noff): when set, the human player and the AI buddy
+// can't damage each other (friendly-fire protection between players[0] and the
+// buddy).  Default 0 = vanilla co-op (they can).  Set in D_DoomMain.
+int		ff_protect = 0;
+
+
+
+
+// a weapon is found with two clip loads,
+// a big item has five clip loads
+int	maxammo[NUMAMMO] = {200, 50, 300, 50, 600, 150};	// +am_fuel (ID24) +am_mace (H)
+int	clipammo[NUMAMMO] = {10, 4, 20, 1, 100, 25};	// +am_fuel (ID24) +am_mace (H)
+
+// Options -> Features: auto-raise a newly picked-up weapon (1 = vanilla DOOM, 0 = keep
+// the weapon you're holding).  Read in P_GiveWeapon.
+int	weapon_autoswitch = 1;
+
+// Options -> Features: player weapon-damage scale as a percentage (100 = vanilla,
+// 50..500).  Read in P_DamageMobj.
+int	weapon_power = 100;
+
+
+//
+// GET STUFF
+//
+
+//
+// P_GiveAmmo
+// Num is the number of clip loads,
+// not the individual count (0= 1/2 clip).
+// Returns false if the ammo can't be picked up at all
+//
+
+boolean
+P_GiveAmmo
+( player_t*	player,
+  ammotype_t	ammo,
+  int		num )
+{
+    int		oldammo;
+	
+    if (ammo == am_noammo)
+	return false;
+		
+    if (ammo < 0 || ammo > NUMAMMO)
+	I_Error ("P_GiveAmmo: bad type %i", ammo);
+		
+    if ( player->ammo[ammo] == player->maxammo[ammo]  )
+	return false;
+		
+    if (num)
+	num *= clipammo[ammo];
+    else
+	num = clipammo[ammo]/2;
+    
+    if (gameskill == sk_baby
+	|| gameskill == sk_nightmare)
+    {
+	// give double ammo in trainer mode,
+	// you'll need in nightmare
+	num <<= 1;
+    }
+    
+		
+    oldammo = player->ammo[ammo];
+    player->ammo[ammo] += num;
+
+    if (player->ammo[ammo] > player->maxammo[ammo])
+	player->ammo[ammo] = player->maxammo[ammo];
+
+    // mbf21 WPF_AUTOSWITCHFROM: if the ready weapon is flagged to be switched away from
+    // when ammo is picked up, and picking this ammo up just made a higher-slot weapon
+    // usable (its ammopershot was more than we had, now <= what we have), switch to it.
+    // (Vanilla weapons set ammopershot 0, so this never fires for them.)
+    if ((weaponinfo[player->readyweapon].flags & WPF_AUTOSWITCHFROM)
+	&& weaponinfo[player->readyweapon].ammo != ammo)
+    {
+	int i;
+	for (i = NUMWEAPONS - 1; i > player->readyweapon; --i)
+	    if (player->weaponowned[i]
+		&& !(weaponinfo[i].flags & WPF_NOAUTOSWITCHTO)
+		&& weaponinfo[i].ammo == ammo
+		&& weaponinfo[i].ammopershot > oldammo
+		&& weaponinfo[i].ammopershot <= player->ammo[ammo])
+	    { player->pendingweapon = i; break; }
+    }
+
+    // If non zero ammo,
+    // don't change up weapons,
+    // player was lower on purpose.
+    if (oldammo)
+	return true;
+
+    // We were down to zero,
+    // so select a new weapon.
+    // Preferences are not user selectable.
+    // mbf21 WPF_NOAUTOSWITCHTO: never auto-switch TO a weapon flagged with it.
+#define AUTOSWITCH(w) (player->weaponowned[w] && !(weaponinfo[w].flags & WPF_NOAUTOSWITCHTO))
+    switch (ammo)
+    {
+      case am_clip:
+	if (player->readyweapon == wp_fist)
+	{
+	    if (AUTOSWITCH(wp_chaingun))
+		player->pendingweapon = wp_chaingun;
+	    else if (!(weaponinfo[wp_pistol].flags & WPF_NOAUTOSWITCHTO))
+		player->pendingweapon = wp_pistol;
+	}
+	break;
+
+      case am_shell:
+	if (player->readyweapon == wp_fist
+	    || player->readyweapon == wp_pistol)
+	{
+	    if (AUTOSWITCH(wp_shotgun))
+		player->pendingweapon = wp_shotgun;
+	}
+	break;
+
+      case am_cell:
+	if (player->readyweapon == wp_fist
+	    || player->readyweapon == wp_pistol)
+	{
+	    if (AUTOSWITCH(wp_plasma))
+		player->pendingweapon = wp_plasma;
+	}
+	break;
+
+      case am_misl:
+	if (player->readyweapon == wp_fist)
+	{
+	    if (AUTOSWITCH(wp_missile))
+		player->pendingweapon = wp_missile;
+	}
+      default:
+	break;
+    }
+#undef AUTOSWITCH
+	
+    return true;
+}
+
+
+//
+// P_GiveWeapon
+// The weapon name may have a MF_DROPPED flag ored in.
+//
+boolean
+P_GiveWeapon
+( player_t*	player,
+  weapontype_t	weapon,
+  boolean	dropped )
+{
+    boolean	gaveammo;
+    boolean	gaveweapon;
+	
+    if (netgame
+	&& (deathmatch!=2)
+	 && !dropped )
+    {
+	// leave placed weapons forever on net games
+	if (player->weaponowned[weapon])
+	    return false;
+
+	player->bonuscount += BONUSADD;
+	player->weaponowned[weapon] = true;
+
+	if (deathmatch)
+	    P_GiveAmmo (player, weaponinfo[weapon].ammo, 5);
+	else
+	    P_GiveAmmo (player, weaponinfo[weapon].ammo, 2);
+	player->pendingweapon = weapon;
+
+	if (player == &players[consoleplayer])
+	    S_StartSound (NULL, sfx_wpnup);
+	return false;
+    }
+	
+    if (weaponinfo[weapon].ammo != am_noammo)
+    {
+	// give one clip with a dropped weapon,
+	// two clips with a found weapon
+	if (dropped)
+	    gaveammo = P_GiveAmmo (player, weaponinfo[weapon].ammo, 1);
+	else
+	    gaveammo = P_GiveAmmo (player, weaponinfo[weapon].ammo, 2);
+    }
+    else
+	gaveammo = false;
+	
+    if (player->weaponowned[weapon])
+	gaveweapon = false;
+    else
+    {
+	extern int weapon_autoswitch;	// Options -> Features (default on = vanilla)
+	gaveweapon = true;
+	player->weaponowned[weapon] = true;
+	// Vanilla DOOM auto-raises a newly picked-up weapon.  With auto-switch off, keep
+	// the weapon you're holding (the buddy bot re-picks its own weapon each tic, so
+	// this only really changes the human's behaviour).
+	if (weapon_autoswitch)
+	    player->pendingweapon = weapon;
+    }
+
+    return (gaveweapon || gaveammo);
+}
+
+ 
+
+//
+// P_GiveBody
+// Returns false if the body isn't needed at all
+//
+boolean
+P_GiveBody
+( player_t*	player,
+  int		num )
+{
+    if (player->health >= MAXHEALTH)
+	return false;
+		
+    player->health += num;
+    if (player->health > MAXHEALTH)
+	player->health = MAXHEALTH;
+    player->mo->health = player->health;
+	
+    return true;
+}
+
+
+
+//
+// P_GiveArmor
+// Returns false if the armor is worse
+// than the current armor.
+//
+boolean
+P_GiveArmor
+( player_t*	player,
+  int		armortype )
+{
+    int		hits;
+	
+    hits = armortype*100;
+    if (player->armorpoints >= hits)
+	return false;	// don't pick up
+		
+    player->armortype = armortype;
+    player->armorpoints = hits;
+	
+    return true;
+}
+
+
+
+//
+// P_GiveCard
+//
+void
+P_GiveCard
+( player_t*	player,
+  card_t	card )
+{
+    if (player->cards[card])
+	return;
+    
+    player->bonuscount = BONUSADD;
+    player->cards[card] = 1;
+}
+
+
+//
+// P_GivePower
+//
+boolean
+P_GivePower
+( player_t*	player,
+  int /*powertype_t*/	power )
+{
+    if (power == pw_invulnerability)
+    {
+	player->powers[power] = INVULNTICS;
+	return true;
+    }
+    
+    if (power == pw_invisibility)
+    {
+	player->powers[power] = INVISTICS;
+	player->mo->flags |= MF_SHADOW;
+	return true;
+    }
+    
+    if (power == pw_infrared)
+    {
+	player->powers[power] = INFRATICS;
+	return true;
+    }
+    
+    if (power == pw_ironfeet)
+    {
+	player->powers[power] = IRONTICS;
+	return true;
+    }
+    
+    if (power == pw_strength)
+    {
+	P_GiveBody (player, 100);
+	player->powers[power] = 1;
+	return true;
+    }
+	
+    if (player->powers[power])
+	return false;	// already got it
+		
+    player->powers[power] = 1;
+    return true;
+}
+
+
+
+//
+// (mod) In buddy co-op, once the human is comfortably healed (>75% HP) a picked-up health item
+// is pocketed into the inventory for later instead of being wasted on a near-full bar.
+// Non-static: the Heretic heal pickups (heretic_items.c / p_inv_heretic.c) reuse this same rule.
+boolean P_HoardHealth (player_t* player)
+{
+    return P_AICoop_Active () && player->health > MAXHEALTH*3/4;
+}
+
+// P_TouchSpecialThing
+//
+void
+P_TouchSpecialThing
+( mobj_t*	special,
+  mobj_t*	toucher )
+{
+    player_t*	player;
+    int		i;
+    fixed_t	delta;
+    int		sound;
+		
+    delta = special->z - toucher->z;
+
+    if (delta > toucher->height
+	|| delta < -8*FRACUNIT)
+    {
+	// out of reach
+	return;
+    }
+
+    // A just-dropped artifact is tossed forward through the air; until it has settled on the
+    // floor, ignore it so the dropper can't instantly re-pocket what they just threw.  (Items a
+    // dying monster drops sit at floor level, momz 0, so they're unaffected.)
+    if ((special->flags & MF_DROPPED) && (special->momz != 0 || special->z > special->floorz))
+	return;
+    
+	
+    sound = sfx_itemup;	
+    player = toucher->player;
+
+    // Dead thing touching.
+    // Can happen with a sliding player corpse.
+    if (toucher->health <= 0)
+	return;
+
+    // The AI co-op buddy must never pocket keys -- the human needs them to open
+    // locked doors.  Leave keycards/skulls on the ground (walk over, don't grab).
+    if (player && P_AICoop_IsBuddy (player))
+    {
+	switch (special->sprite)
+	{
+	  case SPR_BKEY: case SPR_YKEY: case SPR_RKEY:
+	  case SPR_BSKU: case SPR_YSKU: case SPR_RSKU:
+	    return;
+	  default:
+	    break;
+	}
+	// The pickup test in PIT_CheckThing only checks x/y proximity (radius sum),
+	// with no wall between the toucher and the item.  DOOM walls are infinitely
+	// thin linedefs, so the buddy's box can sit ~16u from a one-sided wall while
+	// an item ~16u on the far side is <36u away -> it would pocket things right
+	// through the wall (very visible: it hugs walls while fighting/pathing).
+	// Require an actual line of sight so it only grabs what it could walk onto.
+	if (!P_CheckSight (toucher, special))
+	    return;
+    }
+
+    // (H) Heretic artifact pickup (MT_HARTI_*): pocket it into the inventory.
+    // Done by mobjtype before the sprite switch -- these reuse Heretic sprites
+    // with no DOOM-sprite case, so they'd otherwise hit the I_Error default.
+    if (P_TouchHereticArtifact (player, special))
+    {
+	if (special->flags & MF_COUNTITEM)
+	    player->itemcount++;
+	P_RemoveMobj (special);
+	player->bonuscount += BONUSADD;
+	if (player == &players[consoleplayer])
+	    S_StartSound (NULL, sound);
+	return;
+    }
+
+    // (H) Map-placeable Heretic item (MT_H* keys/ammo/weapons/shields/vial):
+    // handled by mobjtype before the sprite switch -- these reuse Heretic
+    // sprites with no DOOM-sprite case, so they'd otherwise hit the I_Error
+    // default.  EFFECTS are out of scope (see files/heretic_items.c).
+    if (P_TouchHereticItem (player, special))
+    {
+	if (special->flags & MF_COUNTITEM)
+	    player->itemcount++;
+	P_RemoveMobj (special);
+	player->bonuscount += BONUSADD;
+	if (player == &players[consoleplayer])
+	    S_StartSound (NULL, sound);
+	return;
+    }
+
+    // (X) Map-placeable Hexen item (MT_Z* mana/keys/armor/artifacts/puzzle/weapon
+    // pieces): handled by mobjtype before the sprite switch, same as the Heretic
+    // path.  EFFECTS out of scope (see files/hexen_items.c).
+    if (P_TouchHexenItem (player, special))
+    {
+	if (special->flags & MF_COUNTITEM)
+	    player->itemcount++;
+	P_RemoveMobj (special);
+	player->bonuscount += BONUSADD;
+	if (player == &players[consoleplayer])
+	    S_StartSound (NULL, sound);
+	return;
+    }
+
+    // (S) Strife pickup (ammo/weapon/armor/health/keys/inventory): dispatched by sprite
+    // in files/strife_items.c.  In strife_mode EVERY special is a Strife item, so handle
+    // it here and always return -- never fall through to the DOOM sprite switch (whose
+    // default I_Errors on an unknown sprite).  false = couldn't take it -> leave on ground.
+    if (strife_mode)
+    {
+	extern boolean P_TouchStrifeItem (player_t*, mobj_t*);
+	if (P_TouchStrifeItem (player, special))
+	{
+	    if (special->flags & MF_COUNTITEM)
+		player->itemcount++;
+	    P_RemoveMobj (special);
+	    player->bonuscount += BONUSADD;
+	    if (player == &players[consoleplayer])
+		S_StartSound (NULL, sound);
+	}
+	return;
+    }
+
+    // Identify by sprite.
+    switch (special->sprite)
+    {
+	// armor
+      case SPR_ARM1:
+	if (!P_GiveArmor (player, 1))
+	{
+	    // (J) overflow: already have equal-or-better armor -> pocket it.
+	    if (!P_StoreOverflow (player, arti_greenarmor, 1))
+		return;
+	}
+	player->message = deh_GOTARMOR;
+	break;
+
+      case SPR_ARM2:
+	if (!P_GiveArmor (player, 2))
+	{
+	    if (!P_StoreOverflow (player, arti_bluearmor, 1))
+		return;
+	}
+	player->message = deh_GOTMEGA;
+	break;
+	
+	// bonus items
+      case SPR_BON1:
+	if (P_HoardHealth (player) || player->health >= 200)
+	{
+	    // (J) overflow: at the 200 cap -> pocket the bonus instead of wasting it.
+	    if (!P_StoreOverflow (player, arti_healthbonus, 1))
+		return;
+	}
+	else
+	{
+	    player->health++;		// can go over 100%
+	    if (player->health > 200)
+		player->health = 200;
+	    player->mo->health = player->health;
+	}
+	player->message = deh_GOTHTHBONUS;
+	break;
+	
+      case SPR_BON2:
+	if (player->armorpoints >= 200)
+	{
+	    if (!P_StoreOverflow (player, arti_armorbonus, 1))
+		return;
+	}
+	else
+	{
+	    player->armorpoints++;	// can go over 100%
+	    if (player->armorpoints > 200)
+		player->armorpoints = 200;
+	    if (!player->armortype)
+		player->armortype = 1;
+	}
+	player->message = deh_GOTARMBONUS;
+	break;
+	
+      case SPR_SOUL:
+	player->health += 100;
+	if (player->health > 200)
+	    player->health = 200;
+	player->mo->health = player->health;
+	player->message = deh_GOTSUPER;
+	sound = sfx_getpow;
+	break;
+	
+      case SPR_MEGA:
+	if (gamemode != commercial)
+	    return;
+	player->health = 200;
+	player->mo->health = player->health;
+	P_GiveArmor (player,2);
+	player->message = deh_GOTMSPHERE;
+	sound = sfx_getpow;
+	break;
+	
+	// cards
+	// leave cards for everyone
+      case SPR_BKEY:
+	if (!player->cards[it_bluecard])
+	    player->message = deh_GOTBLUECARD;
+	P_GiveCard (player, it_bluecard);
+	if (!netgame)
+	    break;
+	return;
+	
+      case SPR_YKEY:
+	if (!player->cards[it_yellowcard])
+	    player->message = deh_GOTYELWCARD;
+	P_GiveCard (player, it_yellowcard);
+	if (!netgame)
+	    break;
+	return;
+	
+      case SPR_RKEY:
+	if (!player->cards[it_redcard])
+	    player->message = deh_GOTREDCARD;
+	P_GiveCard (player, it_redcard);
+	if (!netgame)
+	    break;
+	return;
+	
+      case SPR_BSKU:
+	if (!player->cards[it_blueskull])
+	    player->message = deh_GOTBLUESKUL;
+	P_GiveCard (player, it_blueskull);
+	if (!netgame)
+	    break;
+	return;
+	
+      case SPR_YSKU:
+	if (!player->cards[it_yellowskull])
+	    player->message = deh_GOTYELWSKUL;
+	P_GiveCard (player, it_yellowskull);
+	if (!netgame)
+	    break;
+	return;
+	
+      case SPR_RSKU:
+	if (!player->cards[it_redskull])
+	    player->message = deh_GOTREDSKULL;
+	P_GiveCard (player, it_redskull);
+	if (!netgame)
+	    break;
+	return;
+	
+	// medikits, heals
+      case SPR_STIM:
+	if (P_HoardHealth (player) || !P_GiveBody (player, 10))
+	{
+	    // overflow: full HP (or >75% in buddy co-op) -> pocket the stimpack for later.
+	    if (!P_StoreOverflow (player, arti_stimpack, 1))
+		return;
+	}
+	player->message = deh_GOTSTIM;
+	break;
+
+      case SPR_MEDI:
+      {
+	// id's original bug: the "...that you REALLY need!" test read player->health AFTER
+	// the +25 heal, so with the medikit's own 25 HP the health was practically always
+	// >= 25 and the special message never showed.  Sample the health BEFORE healing.
+	boolean reallyneeded = (player->health < 25);
+	if (P_HoardHealth (player) || !P_GiveBody (player, 25))
+	{
+	    if (!P_StoreOverflow (player, arti_medikit, 1))
+		return;
+	}
+	player->message = reallyneeded ? deh_GOTMEDINEED : deh_GOTMEDIKIT;
+	break;
+      }
+
+	
+	// power ups
+      case SPR_PINV:
+	if (!P_GivePower (player, pw_invulnerability))
+	    return;
+	player->message = deh_GOTINVUL;
+	sound = sfx_getpow;
+	break;
+	
+      case SPR_PSTR:
+	if (!P_GivePower (player, pw_strength))
+	    return;
+	player->message = deh_GOTBERSERK;
+	if (player->readyweapon != wp_fist)
+	    player->pendingweapon = wp_fist;
+	sound = sfx_getpow;
+	break;
+	
+      case SPR_PINS:
+	if (!P_GivePower (player, pw_invisibility))
+	    return;
+	player->message = deh_GOTINVIS;
+	sound = sfx_getpow;
+	break;
+	
+      case SPR_SUIT:
+	if (!P_GivePower (player, pw_ironfeet))
+	    return;
+	player->message = deh_GOTSUIT;
+	sound = sfx_getpow;
+	break;
+	
+      case SPR_PMAP:
+	if (!P_GivePower (player, pw_allmap))
+	    return;
+	player->message = deh_GOTMAP;
+	sound = sfx_getpow;
+	break;
+	
+      case SPR_PVIS:
+	if (!P_GivePower (player, pw_infrared))
+	    return;
+	player->message = deh_GOTVISOR;
+	sound = sfx_getpow;
+	break;
+	
+	// ammo
+      case SPR_CLIP:
+	if (special->flags & MF_DROPPED)
+	{
+	    if (!P_GiveAmmo (player,am_clip,0))
+		// (J) at max bullets -> pocket the half-clip (clipammo/2) overflow.
+		if (!P_StoreOverflow (player, arti_ammo_bullets, clipammo[am_clip]/2))
+		    return;
+	}
+	else
+	{
+	    if (!P_GiveAmmo (player,am_clip,1))
+		if (!P_StoreOverflow (player, arti_ammo_bullets, clipammo[am_clip]*1))
+		    return;
+	}
+	player->message = deh_GOTCLIP;
+	break;
+
+      case SPR_AMMO:
+	if (!P_GiveAmmo (player, am_clip,5))
+	    if (!P_StoreOverflow (player, arti_ammo_bullets, clipammo[am_clip]*5))
+		return;
+	player->message = deh_GOTCLIPBOX;
+	break;
+
+      case SPR_ROCK:
+	if (!P_GiveAmmo (player, am_misl,1))
+	    if (!P_StoreOverflow (player, arti_ammo_rockets, clipammo[am_misl]*1))
+		return;
+	player->message = deh_GOTROCKET;
+	break;
+
+      case SPR_BROK:
+	if (!P_GiveAmmo (player, am_misl,5))
+	    if (!P_StoreOverflow (player, arti_ammo_rockets, clipammo[am_misl]*5))
+		return;
+	player->message = deh_GOTROCKBOX;
+	break;
+
+      case SPR_CELL:
+	if (!P_GiveAmmo (player, am_cell,1))
+	    if (!P_StoreOverflow (player, arti_ammo_cells, clipammo[am_cell]*1))
+		return;
+	player->message = deh_GOTCELL;
+	break;
+
+      case SPR_CELP:
+	if (!P_GiveAmmo (player, am_cell,5))
+	    if (!P_StoreOverflow (player, arti_ammo_cells, clipammo[am_cell]*5))
+		return;
+	player->message = deh_GOTCELLBOX;
+	break;
+
+      case SPR_SHEL:
+	if (!P_GiveAmmo (player, am_shell,1))
+	    if (!P_StoreOverflow (player, arti_ammo_shells, clipammo[am_shell]*1))
+		return;
+	player->message = deh_GOTSHELLS;
+	break;
+
+      case SPR_SBOX:
+	if (!P_GiveAmmo (player, am_shell,5))
+	    if (!P_StoreOverflow (player, arti_ammo_shells, clipammo[am_shell]*5))
+		return;
+	player->message = deh_GOTSHELLBOX;
+	break;
+	
+      case SPR_BPAK:
+	if (!player->backpack)
+	{
+	    for (i=0 ; i<NUMAMMO ; i++)
+		player->maxammo[i] *= 2;
+	    player->backpack = true;
+	}
+	for (i=0 ; i<NUMAMMO ; i++)
+	    P_GiveAmmo (player, i, 1);
+	player->message = deh_GOTBACKPACK;
+	break;
+	
+	// weapons
+      case SPR_BFUG:
+	if (!P_GiveWeapon (player, wp_bfg, false) )
+	    return;
+	player->message = deh_GOTBFG9000;
+	sound = sfx_wpnup;	
+	break;
+	
+      case SPR_MGUN:
+	if (!P_GiveWeapon (player, wp_chaingun, special->flags&MF_DROPPED) )
+	    return;
+	player->message = deh_GOTCHAINGUN;
+	sound = sfx_wpnup;	
+	break;
+	
+      case SPR_CSAW:
+	if (!P_GiveWeapon (player, wp_chainsaw, false) )
+	    return;
+	player->message = deh_GOTCHAINSAW;
+	sound = sfx_wpnup;	
+	break;
+	
+      case SPR_LAUN:
+	if (!P_GiveWeapon (player, wp_missile, false) )
+	    return;
+	player->message = deh_GOTLAUNCHER;
+	sound = sfx_wpnup;	
+	break;
+	
+      case SPR_PLAS:
+	if (!P_GiveWeapon (player, wp_plasma, false) )
+	    return;
+	player->message = deh_GOTPLASMA;
+	sound = sfx_wpnup;	
+	break;
+	
+      case SPR_SHOT:
+	if (!P_GiveWeapon (player, wp_shotgun, special->flags&MF_DROPPED ) )
+	    return;
+	player->message = deh_GOTSHOTGUN;
+	sound = sfx_wpnup;	
+	break;
+		
+      case SPR_SGN2:
+	if (!P_GiveWeapon (player, wp_supershotgun, special->flags&MF_DROPPED ) )
+	    return;
+	player->message = deh_GOTSHOTGUN2;
+	sound = sfx_wpnup;	
+	break;
+		
+      default:
+	// An unhandled pickup used to HARD-CRASH here.  Vanilla DOOM has a case for
+	// every gettable sprite, but a Heretic/other-game or modded map-placed item can
+	// reach this default (no Heretic handler + no DOOM sprite case).  Never die on a
+	// pickup: leave it on the ground (don't remove it) and warn once so it's
+	// debuggable.  Returning here skips the P_RemoveMobj/sound below.
+	{
+	    static boolean warned;
+	    if (!warned)
+	    {
+		fprintf (stderr, "P_TouchSpecialThing: unhandled pickup left on the "
+			 "ground (sprite %d, mobjtype %d)\n", special->sprite, special->type);
+		warned = true;
+	    }
+	    return;
+	}
+    }
+	
+    if (special->flags & MF_COUNTITEM)
+	player->itemcount++;
+    P_RemoveMobj (special);
+    player->bonuscount += BONUSADD;
+    if (player == &players[consoleplayer])
+	S_StartSound (NULL, sound);
+}
+
+
+//
+// KillMobj
+//
+void
+P_KillMobj
+( mobj_t*	source,
+  mobj_t*	target )
+{
+    mobjtype_t	item;
+    mobj_t*	mo;
+	
+    target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);
+
+    if (target->type != MT_SKULL)
+	target->flags &= ~MF_NOGRAVITY;
+
+    target->flags |= MF_CORPSE|MF_DROPOFF;
+    target->height >>= 2;
+
+    if (source && source->player)
+    {
+	// count for intermission
+	if (target->flags & MF_COUNTKILL)
+	    source->player->killcount++;	
+
+	if (target->player)
+	    source->player->frags[target->player-players]++;
+    }
+    else if (!netgame && (target->flags & MF_COUNTKILL) )
+    {
+	// count all monster deaths,
+	// even those caused by other monsters
+	players[0].killcount++;
+    }
+    
+    if (target->player)
+    {
+	// count environment kills against you
+	if (!source)	
+	    target->player->frags[target->player-players]++;
+			
+	target->flags &= ~MF_SOLID;
+	target->player->playerstate = PST_DEAD;
+	P_DropWeapon (target->player);
+
+	if (target->player == &players[consoleplayer]
+	    && automapactive)
+	{
+	    // don't die in auto map,
+	    // switch view prior to dying
+	    AM_Stop ();
+	}
+	
+    }
+
+    if (target->health < -target->info->spawnhealth 
+	&& target->info->xdeathstate)
+    {
+	P_SetMobjState (target, target->info->xdeathstate);
+    }
+    else
+	P_SetMobjState (target, target->info->deathstate);
+    target->tics -= P_Random()&3;
+
+    if (target->tics < 1)
+	target->tics = 1;
+		
+    //	I_StartSound (&actor->r, actor->info->deathsound);
+
+
+    // Drop stuff.
+    // This determines the kind of object spawned
+    // during the death frame of a thing.
+    switch (target->type)
+    {
+      case MT_WOLFSS:
+      case MT_POSSESSED:
+	item = MT_CLIP;
+	break;
+	
+      case MT_SHOTGUY:
+	item = MT_SHOTGUN;
+	break;
+	
+      case MT_CHAINGUY:
+	item = MT_CHAINGUN;
+	break;
+	
+      default:
+	return;
+    }
+
+    mo = P_SpawnMobj (target->x,target->y,ONFLOORZ, item);
+    mo->flags |= MF_DROPPED;	// special versions of items
+}
+
+
+//
+// (X) HEXEN POISON  (ported from crispy-doom src/hexen/p_inter.c)
+//
+// The Cleric's Flechette leaves a poison cloud (files/hexen.c, MT_XPOISONCLOUD).
+// Instead of hitting once, it feeds the victim's `poisoncount`; P_PlayerThink then
+// bleeds 1 HP off every 16 tics until the counter decays.  Poison ignores armor.
+//
+
+//
+// P_PoisonPlayer - accrue poison on a player (crispy P_PoisonPlayer).
+//
+void P_PoisonPlayer (player_t* player, mobj_t* poisoner, int poison)
+{
+    if ((player->cheats & CF_GODMODE) || player->powers[pw_invulnerability])
+	return;
+    player->poisoncount += poison;
+    player->poisoner = poisoner;
+    if (player->poisoncount > 100)
+	player->poisoncount = 100;
+}
+
+//
+// P_PoisonDamage - apply poison damage directly to a player (crispy P_PoisonDamage).
+// Bypasses armor (unlike P_DamageMobj); `source` is the poisoner (may be NULL after a
+// savegame load).  Kills via P_KillMobj if it drains the last hit point.
+//
+void P_PoisonDamage (player_t* player, mobj_t* source, int damage,
+		     boolean playPainSound)
+{
+    mobj_t*	target = player->mo;
+
+    if (!target || target->health <= 0)
+	return;
+    if (gameskill == sk_baby)
+	damage >>= 1;		// half damage in trainer mode
+    if (damage < 1000
+	&& ((player->cheats & CF_GODMODE) || player->powers[pw_invulnerability]))
+	return;
+
+    player->health -= damage;	// mirror mobj health for the status bar
+    if (player->health < 0)
+	player->health = 0;
+    player->attacker = source;
+
+    target->health -= damage;
+    if (target->health <= 0)
+    {
+	P_KillMobj (source, target);
+	return;
+    }
+
+    // red screen flash + pain groan (throttled so a long soak isn't a siren)
+    if (playPainSound && !(leveltime & 15))
+	S_StartSound (target, sfx_plpain);
+    player->damagecount += damage;
+    if (player->damagecount > 100)
+	player->damagecount = 100;
+}
+
+
+//
+// P_DamageMobj
+// Damages both enemies and players
+// "inflictor" is the thing that caused the damage
+//  creature or missile, can be NULL (slime, etc)
+// "source" is the thing to target after taking damage
+//  creature or NULL
+// Source and inflictor are the same for melee attacks.
+// Source can be NULL for slime, barrel explosions
+// and other environmental stuff.
+//
+void
+P_DamageMobj
+( mobj_t*	target,
+  mobj_t*	inflictor,
+  mobj_t*	source,
+  int 		damage )
+{
+    unsigned	ang;
+    int		saved;
+    player_t*	player;
+    fixed_t	thrust;
+    int		temp;
+	
+    if ( !(target->flags & MF_SHOOTABLE) )
+	return;	// shouldn't happen...
+		
+    if (target->health <= 0)
+	return;
+
+    // (H) The Maulotaur is invulnerable while charging (MF_SKULLFLY): you can't stun
+    // or kill it mid-slam -- it barrels through until its charge timer ends.
+    {
+	extern int heretic_mode;
+	if (heretic_mode && target->type == MT_HMINOTAUR && (target->flags & MF_SKULLFLY))
+	    return;
+    }
+
+    // (feature) Weapon Power (Options -> Features, 50..500%): scale the damage a PLAYER's
+    // weapon deals -- hitscan, melee and projectiles all pass source = the shooter.
+    // Splash back on the shooter itself (source == target) is left unscaled so a high
+    // setting doesn't nuke you with your own rockets.
+    {
+	extern int weapon_power;
+	if (weapon_power != 100 && source && source->player && source != target)
+	    damage = damage * weapon_power / 100;
+    }
+
+    // (buddy) BUDDYDEF `damagescale`: the selected buddy's own multiplier, on top of the
+    // above.  It lives here for the same reason weapon_power does -- every damage path
+    // passes source = the attacker -- and because a buddy that borrows a MONSTER attack
+    // has its damage baked into the codepointer (A_BruisAttack: (P_Random()%8+1)*10),
+    // where no data key can reach it.  This is the one place that covers melee, hitscan
+    // and projectiles alike.  Self-damage stays unscaled, as above.
+    {
+	int bscale = P_Buddy_DamageScale (source);
+	if (bscale != 100 && source != target)
+	    damage = damage * bscale / 100;
+    }
+
+    // (M) Morph Ovum: the egg projectile (MT_HEGGFX) morphs the struck monster
+    // into a chicken instead of damaging it.  Mirrors crispy's special-damage
+    // switch in P_DamageMobj.  If the morph is refused (boss / player / already
+    // morphed) the egg just fizzles -- it does 0 damage either way, so return.
+    if (inflictor && inflictor->type == MT_HEGGFX)
+    {
+	P_MorphMonster (target, MT_CHICKEN, CHICKENTICS);
+	return;
+    }
+
+    // (X) Hexen poison cloud: area denial that bites MONSTERS ONLY.  No thrust, no
+    // retaliation, no poison counter: return.
+    //
+    // Hexen proper poisons the player who stands in one (crispy's MT_POISONCLOUD case
+    // fed player->poisoncount and P_PlayerThink drained it).  We deliberately part
+    // company: here the gas is usually thrown BY your companion, who drops it on the
+    // fight you are standing in, so a cloud that punishes the humans makes the ability
+    // unusable.  Allies are exempt for the same reason.
+    if (inflictor && inflictor->type == MT_XPOISONCLOUD)
+    {
+	if (target->player || (target->flags & MF_FRIEND))
+	    return;				// humans and allies do not breathe it
+	if (!(target->flags & MF_COUNTKILL))
+	    return;				// nor do inert things
+	// monsters fall through and take the small direct `damage`
+    }
+
+    // Player-side helpers -- a deployed sentry turret (MT_TURRET) or any FRIENDLY actor
+    // (the buddy-spawned Security Drone MT_SECDRONE, or a friendly monster) -- must never
+    // damage the human, the AI buddy, or another friendly, even on a stray hit (spread,
+    // or someone stepping into the line of fire).  Bail before any thrust/damage.
+    if (source && (source->type == MT_TURRET || (source->flags & MF_FRIEND))
+	&& (target->player || (target->flags & MF_FRIEND)))
+	return;
+
+    // -nofriendlyfire: the human player and the AI buddy can't hurt each other
+    // (default off = vanilla co-op, where they can).  Bail before any thrust,
+    // momentum reset, damage or retaliation, so it's as if the shot never hit.
+    if (ff_protect && source && source->player && target->player
+	&& (P_AICoop_IsBuddy (source->player) ^ P_AICoop_IsBuddy (target->player)))
+	return;
+
+    if ( target->flags & MF_SKULLFLY )
+    {
+	target->momx = target->momy = target->momz = 0;
+    }
+	
+    player = target->player;
+    if (player && gameskill == sk_baby)
+	damage >>= 1; 	// take half damage in trainer mode
+		
+
+    // Some close combat weapons should not
+    // inflict thrust and push the victim out of reach,
+    // thus kick away unless using the chainsaw.
+    if (inflictor
+	&& !(target->flags & MF_NOCLIP)
+	&& (!source
+	    || !source->player
+	    || (source->player->readyweapon != wp_chainsaw		// mbf21 WPF_NOTHRUST: this
+		&& !(weaponinfo[source->player->readyweapon].flags & WPF_NOTHRUST))))	// weapon doesn't push
+    {
+	ang = R_PointToAngle2 ( inflictor->x,
+				inflictor->y,
+				target->x,
+				target->y);
+		
+	{   // (buddy) the alt buddy's own mass, else the shared mobjinfo one
+	    int ms = P_Buddy_BodyMass (target);
+	    if (ms <= 0) ms = target->info->mass;
+	    thrust = damage*(FRACUNIT>>3)*100/ms;
+	}
+
+	// make fall forwards sometimes
+	if ( damage < 40
+	     && damage > target->health
+	     && target->z - inflictor->z > 64*FRACUNIT
+	     && (P_Random ()&1) )
+	{
+	    ang += ANG180;
+	    thrust *= 4;
+	}
+		
+	ang >>= ANGLETOFINESHIFT;
+	target->momx += FixedMul (thrust, finecosine[ang]);
+	target->momy += FixedMul (thrust, finesine[ang]);
+    }
+    
+    // player specific
+    if (player)
+    {
+	// end of game hell hack
+	if (target->subsector->sector->special == 11
+	    && damage >= target->health)
+	{
+	    damage = target->health - 1;
+	}
+	
+
+	// Below certain threshold,
+	// ignore damage in GOD mode, or with INVUL power.
+	if ( damage < 1000
+	     && ( (player->cheats&CF_GODMODE)
+		  || player->powers[pw_invulnerability] ) )
+	{
+	    return;
+	}
+	
+	if (player->armortype)
+	{
+	    if (player->armortype == 1)
+		saved = damage/3;
+	    else
+		saved = damage/2;
+	    
+	    if (player->armorpoints <= saved)
+	    {
+		// armor is used up
+		saved = player->armorpoints;
+		player->armortype = 0;
+	    }
+	    player->armorpoints -= saved;
+	    damage -= saved;
+	}
+	player->health -= damage; 	// mirror mobj health here for Dave
+	if (player->health < 0)
+	    player->health = 0;
+
+	P_AICoop_NoteDamage (target, source, damage);	// buddy danger heatmap + friendly-fire callout
+	P_Director_NoteDamage (target, damage);		// L4D stress: damage taken (burst-weighted)
+
+	player->attacker = source;
+
+	// Directional damage indicator (HUD): flash a red arc around the crosshair
+	// pointing where the hit came FROM, for the player being viewed.  Prefer the
+	// inflictor (projectile / explosion right next to you), else the attacker
+	// (hitscan shooter).  Cosmetic only -- R_DamageIndicator touches no playsim state.
+	{
+	    mobj_t* org = inflictor ? inflictor : source;
+	    if (org && org != target && target->player == &players[displayplayer])
+	    {
+		extern void R_DamageIndicator (angle_t ang);
+		R_DamageIndicator (R_PointToAngle2 (target->x, target->y, org->x, org->y));
+	    }
+	}
+
+	player->damagecount += damage;	// add damage after armor / invuln
+
+	if (player->damagecount > 100)
+	    player->damagecount = 100;	// teleport stomp does 10k points...
+	
+	temp = damage < 100 ? damage : 100;
+
+	if (player == &players[consoleplayer])
+	    I_Tactile (40,10,40+temp*2);
+    }	// do the damage
+    target->health -= damage;
+    if (target->health <= 0)
+    {
+	{	// JEV nemesis: ground-truth kill attribution (tactic + killing weapon).
+	    extern void NEM_NoteKillM (mobj_t*, mobj_t*, int);
+	    int nwi = (source && source->player) ? source->player->readyweapon : -1;
+	    NEM_NoteKillM (target, source, nwi);
+	}
+	P_AICoop_NoteKill (target, source);	// buddy kill-quip / spree / "nice" callout
+	P_Director_NoteKill (target, source);	// L4D stress: close-quarters kill credit
+	if (target->player && !P_AICoop_IsBuddy (target->player))
+	    P_Director_Say ("dir:death", 3, 1);	// (voice) the director taunts a survivor's death
+	P_KillMobj (source, target);
+	// Downed buddy: it must end up as a readable, revivable body on the ground (gray
+	// via its player colour translation) and must never gib -- but it should still DIE
+	// on screen.  Snapping straight to the final lying frame (S_PLAY_DIE7) did the
+	// first two and killed the third: the death animation was over in the tic it
+	// started, and after a gibbing hit it also ended on the wrong frame, because
+	// P_KillMobj had just entered the XDEATH run.  Restart the NORMAL death instead:
+	// it plays all seven frames and its last one IS that lying pose (tics -1), so the
+	// body still comes to rest exactly where it did before.
+	if (target->player && P_AICoop_IsBuddy (target->player))
+	    P_SetMobjState (target, S_PLAY_DIE1);
+	// (buddy mode) A human that has a stored stimpack/medikit is NOT auto-patched -- it
+	// dies, but can spend the item itself to get back up (the inventory-use key while
+	// dead -> P_InventorySelfRevive).  Hint at it.
+	else if (target->player && P_AICoop_Active ()
+		 && (target->player->inventory[arti_medikit] > 0
+		     || target->player->inventory[arti_stimpack] > 0
+		     || target->player->inventory[h_arti_flask] > 0	// (H) Quartz Flask
+		     || target->player->inventory[h_arti_urn] > 0))	// (H) Mystic Urn
+	    target->player->message = "USE a health item to patch yourself up!";
+	return;
+    }	// JEV nemesis: ground-truth hit attribution (type, damage, weapon).
+	{
+	    extern void NEM_NoteHit (mobj_t*, mobj_t*, int, int);
+	    int nwi = (source && source->player) ? source->player->readyweapon : -1;
+	    NEM_NoteHit (target, source, damage, nwi);
+	}
+
+	{ int pc = P_Buddy_BodyPainchance (target);	// (buddy) alt buddy's own painchance
+      if (pc < 0) pc = target->info->painchance;
+    if ( (P_Random () < pc)
+	 && !(target->flags&MF_SKULLFLY) )
+    {
+	target->flags |= MF_JUSTHIT;	// fight back!
+	
+	P_SetMobjState (target, target->info->painstate);
+    } }		// close the (buddy) painchance block
+			
+    target->reactiontime = 0;		// we're awake now...	
+
+    // mbf21: MF2_NOTHRESHOLD generalises the arch-vile's "no target threshold" (retaliate
+    // instantly), MF2_DMGIGNORED generalises "other things ignore its attacks".  Vanilla
+    // MT_VILE keeps both via the type checks; the flags add them for DEHACKED actors.
+    if ( (!target->threshold || target->type == MT_VILE || (target->flags2 & MF2_NOTHRESHOLD))
+	 && source && source != target
+	 && source->type != MT_VILE && !(source->flags2 & MF2_DMGIGNORED)
+	 && !(mobjinfo[target->type].infighting_group != 0		// mbf21: same infighting-group -> no infighting
+	      && mobjinfo[target->type].infighting_group == mobjinfo[source->type].infighting_group)
+	 && !((target->flags & MF_FRIEND) && source->player) )	// a friendly (revived marine / summon) never turns on the human
+    {
+	// if not intent on another player,
+	// chase after this one
+
+	extern int monsters_remember;	// (M) MBF, p_enemy.c
+
+	// (M) MBF monsters_remember: file the CURRENT quarry away first, so that
+	// when this new attacker is dealt with (or lost) the monster goes back to
+	// hunting rather than standing down.  Not over a still-live grudge, and
+	// never a fellow friend -- a friendly that got clipped by another friendly
+	// should not remember it as an enemy to return to.
+	if (monsters_remember && target->target
+	    && (!target->lastenemy || target->lastenemy->health <= 0
+		|| (!((target->flags ^ target->lastenemy->flags) & MF_FRIEND)
+		    && target->target != source)))
+	    target->lastenemy = target->target;
+
+	target->target = source;
+	target->threshold = BASETHRESHOLD;
+	if (target->state == &states[target->info->spawnstate]
+	    && target->info->seestate != S_NULL)
+	    P_SetMobjState (target, target->info->seestate);
+    }
+			
+}
+

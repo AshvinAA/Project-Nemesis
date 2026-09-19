@@ -14,6 +14,11 @@ the demons learn how *you* kill them and get harder in real time.
   weight shifts back as engine-clamped proposals. Replay mode + mock Jev for
   offline runs. See `jev/README.md`.
 - `docs/JEV_DIRECTOR_WORKFLOW.md` — the full design & build record.
+<<<<<<< HEAD
+=======
+- `HANDOFF.md` — **start here if you're new (human or AI)**: complete state,
+  verified protocol facts, what broke and why, and the ordered next steps.
+>>>>>>> 7defafcceec35f6ac6fd067658044e801e647032
 
 ## Quick start
 

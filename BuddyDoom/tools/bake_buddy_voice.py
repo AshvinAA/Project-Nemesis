@@ -1,0 +1,781 @@
+#!/usr/bin/env python3
+"""
+bake_buddy_voice.py -- pre-render the BuddyDoom AI co-op buddy's spoken lines
+from ElevenLabs TTS, and pack them into a Doom PWAD (`buddydoom.wad`) so the
+engine can play them offline with no network at runtime.
+
+Why a WAD: the engine already has a single-file lump archive loader
+(`files/w_wad.c`); shipping the voice lines as lumps is consistent with
+every other asset the engine loads, and a single file is much nicer
+to distribute than 37 loose .ogg files.  See CLAUDE.md / LEGACY_FIXES.md
+("offline buddy voice via stb_vorbis + dedicated SDL audio stream").
+
+Output:
+    run/buddydoom.wad              (PWAD with ~130 DS* OGG/Vorbis lumps + a VOICEMAP
+                                 text lump carrying the lump<->phrase mapping)
+    run/buddydoom_voice_manifest.txt  (same mapping, as a loose file)
+
+Phrases: the original 37 (callouts/state/replies/status) PLUS event callouts
+(kill/dodge/dry/barrel/crit/taunt/bigmon/edge/jump/door/stuck/lost/ff/plhurt/
+pldown/healed/god/arm/lvlstart/lvlclear/idle/...), Joker-HL voice.
+
+Pipeline: ElevenLabs returns MP3 -> ffmpeg transcodes to OGG/Vorbis -> packed into
+the WAD.  API key from ~/.hermes/.env (or --key / $ELEVENLABS_API_KEY), NEVER buddydoom.cfg.
+
+ElevenLabs:
+    - voice id        configurable; default Joker-HL (matches in-game default)
+    - model           eleven_turbo_v2_5  (fast, callout-grade latency)
+    - output_format   ogg_vorbis         (engine decodes with stb_vorbis)
+    - voice_settings  stability 0.4 / similarity 0.85 / style 0.5 (per phrase)
+
+Usage:
+    export ELEVENLABS_API_KEY=sk_...
+    python3 tools/bake_buddy_voice.py                       # full bake
+    python3 tools/bake_buddy_voice.py --voice zmclHrhV...   # different voice
+    python3 tools/bake_buddy_voice.py --out run/buddydoom.wad   # custom path
+    python3 tools/bake_buddy_voice.py --dry-run             # print phrases, no API
+
+Idempotent: skips phrases whose OGG already exists in a cache directory,
+so re-runs only fetch what changed.  Use --force to redownload all.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import struct
+import sys
+import time
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+
+# ---------- phrase table (37 entries, must match engine's runtime mapping) ----------
+
+# Lump names are exactly 8 ASCII chars (Doom WAD limit); we use the same `DS` prefix
+# as the engine's existing SFX lumps so the i_voice.c loader can range over `ds*`
+# lumps in the buddydoom.wad namespace without colliding with game-SFX lumps (which
+# live in the IWAD, not in buddydoom.wad).
+def _lump(name: str) -> str:
+    """Truncate/pad to exactly 8 chars (uppercase ASCII) per Doom WAD spec.
+    Truncation silently merges lumps -- this raises instead so the bake
+    script fails loudly on a typo rather than producing a WAD with collisions."""
+    n = name.upper().replace("-", "").replace("'", "").replace(".", "")
+    if len(n) > 8:
+        raise ValueError(f"lump name '{name}' is {len(n)} chars (>8); "
+                         f"shorten the prefix or the discriminator")
+    return (n + "        ")[:8]
+
+
+# Each entry: (lump_name_8char, phrase_to_speak)
+# Auto-callouts (10, from p_ai_coop.c:714-716, rotated by rate limiter).
+# Lump names are exactly 8 chars (Doom WAD spec): "DSCT" + "001".."004" for
+# contact, "DSHR" + "01".."03" for hurt, "DSCL" + "01".."03" for clear.
+CALLOUTS = [
+    ("DSCT001", "Contact!"),
+    ("DSCT002", "Tango, engaging!"),
+    ("DSCT003", "I see one!"),
+    ("DSCT004", "Got movement!"),
+    ("DSHR01",  "I'm hit!"),
+    ("DSHR02",  "Taking fire!"),
+    ("DSHR03",  "I need health!"),
+    ("DSCL01",  "Area clear."),
+    ("DSCL02",  "All quiet."),
+    ("DSCL03",  "Watch our six."),
+]
+
+# Where-state report (6, from p_ai_coop.c:368-369 `what[]`); HP/distance spoken
+# by the screen HUD already, so the voice only carries the semantic state.
+STATES = [
+    ("DSWFOLLOW", "Following you."),
+    ("DSWFIGHT",  "Fighting."),
+    ("DSWHEAL",   "Getting health."),
+    ("DSWHOLD",   "Holding position."),
+    ("DSWCOME",   "Coming to you."),
+    ("DSWGRAB",   "Grabbing an item."),
+]
+
+# Console replies (5, from c_console.c:262-264, p_ai_coop.c:412/428/432)
+REPLIES = [
+    ("DSSUMONOK", "On my way!"),
+    ("DSWAITHD",  "Holding position."),
+    ("DSWAITMV",  "Moving out."),
+    ("DSATACK",   "Attacking!"),
+    ("DSATNONE",  "No targets around."),
+]
+
+# Status report (16 = 9 weapons x {plain, with-ammo}); weapon names from
+# p_ai_coop.c:438-439 `wn[NUMWEAPONS]`.  Numbers (HP/armor/ammo) appear on
+# the HUD; the voice just announces the weapon.
+#
+# 4-letter weapon codes that are unique within the 8-char budget and don't
+# collide with each other.  Plain = name only, Ammo = name + " loaded".
+# Lump name = "DSST" + code + ("P"|"A")  ->  must be <= 8 chars.
+# "DSST" (4) + code (3) + P/A (1) = 8 chars max -> use 3-char codes.
+WEAPON_CODES = [
+    ("FIS",  "fists",          "Fists."),
+    ("PIS",  "pistol",         "Pistol."),
+    ("SHT",  "shotgun",        "Shotgun."),
+    ("CHG",  "chaingun",       "Chaingun."),
+    ("RCK",  "rocketlauncher", "Rocket launcher."),
+    ("PLS",  "plasma",         "Plasma rifle."),
+    ("BFG",  "bfg",            "B. F. G."),
+    ("CSW",  "chainsaw",       "Chainsaw."),
+    ("SSH",  "supershotgun",   "Super shotgun."),
+]
+WEAPONS_WITH_AMMO = {"PIS", "SHT", "CHG", "RCK", "PLS", "BFG", "SSH"}
+
+STATUS_LUMPS = []
+for code, _wkey, wname in WEAPON_CODES:
+    STATUS_LUMPS.append((_lump("DSST" + code + "P"), wname))
+    if code in WEAPONS_WITH_AMMO:
+        STATUS_LUMPS.append((_lump("DSST" + code + "A"), wname + " Loaded."))
+
+# Extra event callouts (rotated by AICoop_Callout).  Tag = prefix + index (e.g.
+# "kill:0"); lump <= 8 chars; mapping mirrored in files/i_voice.c.  Joker-HL voice.
+EVENTS = [
+    # -- combat
+    ("DSKL01", "Got him!"), ("DSKL02", "Down!"), ("DSKL03", "Scratch one."), ("DSKL04", "Stay down."),
+    # Duke-style monster-specific kill quips -- one per monster type (rare, see NoteKill).
+    ("DSKI01", "I pimped that imp!"), ("DSKI02", "Imp? More like wimp."), ("DSKI03", "Hot-footed that imp."),
+    ("DSKZM01", "Zombie down."),               # zombieman
+    ("DSKSG01", "Thanks for the shells!"),      # shotgun guy
+    ("DSKCG01", "Quit hoggin' the chaingun."),  # chaingunner
+    ("DSKPK01", "Bad dog!"),                    # pinky / demon
+    ("DSKSC01", "I see you, fuzzy."),           # spectre
+    ("DSKSL01", "Lost soul, meet floor."),      # lost soul
+    ("DSKCD01", "Eat dirt, meatball!"),         # cacodemon
+    ("DSKPE01", "No more skull spam."),         # pain elemental
+    ("DSKHK01", "Knight, night!"),              # hell knight
+    ("DSKBN01", "Baron? Barely."),              # baron of hell
+    ("DSKRV01", "Rest in pieces, bonehead!"),   # revenant
+    ("DSKMC01", "Lay off the donuts."),         # mancubus
+    ("DSKAR01", "Squashed that bug."),          # arachnotron
+    ("DSKMM01", "Big spider, big splat."),      # spider mastermind
+    ("DSKCY01", "Tim-ber!"),                    # cyberdemon
+    ("DSKAV01", "Stay dead this time!"),        # arch-vile
+    ("DSKNS01", "Wrong game, pal."),            # SS nazi
+    ("DSKKN01", "Door's open!"),                # commander keen
+    ("DSDG01", "Incoming!"), ("DSDG02", "Whoa!"), ("DSDG03", "Not today."),
+    ("DSDRY01", "I'm dry!"), ("DSDRY02", "Out of ammo!"), ("DSDRY03", "Need a reload!"),
+    ("DSBR01", "Not near that barrel!"), ("DSBR02", "Barrel -- hold up."), ("DSBR03", "That thing'll blow."),
+    ("DSSP01", "On a roll!"), ("DSSP02", "Can't stop me!"), ("DSSP03", "They keep coming!"), ("DSSP04", "Damn, I'm good."),
+    ("DSGB01", "Chunky."), ("DSGB02", "Boom!"), ("DSGB03", "Cleanup on aisle hell."),
+    ("DSCR01", "I'm dying here!"), ("DSCR02", "Critical -- cover me!"), ("DSCR03", "Patch me up, now!"),
+    ("DSFS01", "Just my fists now."), ("DSFS02", "Knuckle up."),
+    ("DSTN01", "Come get some!"), ("DSTN02", "Is that all?"), ("DSTN03", "I do this for fun."), ("DSTN04", "Rest in pieces!"),
+    ("DSBIG01", "Big one!"), ("DSBIG02", "Oh, that's a Cyberdemon..."), ("DSBIG03", "We're gonna need more ammo."),
+    ("DSFL01", "Behind you!"), ("DSFL02", "They're flanking!"), ("DSFL03", "On your six!"),
+    ("DSIF01", "Let 'em fight."), ("DSIF02", "They're killing each other!"),
+    # -- navigation / movement
+    ("DSED01", "Careful -- nukage."), ("DSED02", "Watch the edge."), ("DSED03", "Easy, long drop."),
+    ("DSJP01", "Hup!"), ("DSJP02", "Up we go."),
+    ("DSDO01", "Door!"), ("DSDO02", "Opening up."),
+    ("DSSK01", "I'm stuck!"), ("DSSK02", "Gimme a sec."), ("DSSK03", "Snagged on something."),
+    ("DSLS01", "Where'd you go?"), ("DSLS02", "Wait up!"), ("DSLS03", "I lost you!"),
+    ("DSLK01", "Locked. Need a key."), ("DSLK02", "Can't open this one."),
+    ("DSCU01", "Crusher!"), ("DSCU02", "Don't get squished."),
+    # -- co-op / player
+    ("DSPH01", "You okay?!"), ("DSPH02", "I got you covered!"), ("DSPH03", "Fall back, I'll hold!"),
+    ("DSPD01", "No! ...I'll avenge you."), ("DSPD02", "Stay down, I got this."),
+    ("DSFF01", "Hey! Watch it!"), ("DSFF02", "Friendly fire!"), ("DSFF03", "That's MY blood, pal."),
+    ("DSFF04", "Friendly fire, jackass!"), ("DSFF05", "I'm on YOUR side, genius!"), ("DSFF06", "Shoot them, not me!"),
+    ("DSNC01", "Nice shot!"), ("DSNC02", "Good kill."),
+    # -- items / power-ups / status
+    ("DSPU01", "Nice, ammo!"), ("DSPU02", "Health -- sweet."), ("DSPU03", "Don't mind if I do."),
+    ("DSHL01", "Patched up."), ("DSHL02", "Better. Let's go."),
+    ("DSBK01", "Berserk! Get over here!"), ("DSBK02", "Now I'm untouchable!"),
+    ("DSGOD01", "Invincible!"), ("DSGOD02", "Can't touch me."),
+    ("DSARM01", "Loaded for bear!"), ("DSARM02", "Now we're talking."),
+    # -- progression / banter
+    ("DSLV01", "Fresh hell."), ("DSLV02", "Here we go again."), ("DSLV03", "Let's clear it."),
+    ("DSWN01", "All dead. Nice."), ("DSWN02", "Find the exit."), ("DSWN03", "Hail to the king."),
+    ("DSSE01", "Secret!"), ("DSSE02", "Ooh, hidden stash."),
+    ("DSID01", "Quiet... too quiet."), ("DSID02", "Anything?"), ("DSID03", "Still with me?"), ("DSID04", "I hate the waiting."),
+    # -- buddy DOWN (incapacitated) / revived
+    ("DSHELP01", "Man down! Help!"),
+    ("DSHELP02", "I'm hit bad -- get over here!"),
+    ("DSHELP03", "Don't leave me!"),
+    ("DSHELP04", "Buddy down! Medic!"),
+    ("DSHELP05", "Help me up, damn it!"),
+    ("DSHELP06", "Aagh -- I'm down, I'm down!"),
+    ("DSHELP07", "Can't move -- cover me and get over here!"),
+    ("DSHELP08", "They tore me up... patch me up, marine!"),
+    ("DSREV01", "Back in the fight!"),
+    ("DSREV02", "Thanks -- I owe you one."),
+    ("DSREV03", "Let's finish this."),
+    # -- player picked the downed buddy back up: thank them (reliable, VP_COMMAND)
+    ("DSTHX01", "Thanks, I owe you one!"),
+    ("DSTHX02", "You saved my hide -- cheers!"),
+    ("DSTHX03", "I won't forget this, marine!"),
+    ("DSTHX04", "Back in action -- let's move!"),
+    ("DSTHX05", "Knew you'd come back for me."),
+    ("DSTHX06", "Good as new. Cheers, marine!"),
+    # -- teleport / regroup home (buddyhome command + auto-recall off a hazard)
+    ("DSHOME01", "Regrouping on you!"),
+    ("DSHOME02", "Beam me back, baby!"),
+    ("DSHOME03", "Miss me? I'm back!"),
+]
+for _n, _p in EVENTS:
+    _lump(_n)   # enforce the 8-char Doom lump limit at import time
+
+PHRASES = CALLOUTS + STATES + REPLIES + STATUS_LUMPS + EVENTS
+_allnames = [n for n, _ in PHRASES]
+assert len(_allnames) == len(set(_allnames)), "duplicate lump name in PHRASES"
+
+
+# ---------- AI "Director" voice (a separate persona/voice id) ----------------
+# The L4D-style AI Director (p_ai_director.c) gets its own booming game-master
+# voice -- a cold announcer that narrates spawns, phases and item drops, distinct
+# from the buddy's Joker tone.  Lumps use the "DD" prefix (vs the buddy's "DS")
+# and are mapped to "dir:*" tags in files/i_voice.c; they play on a SEPARATE SDL
+# stream so the Director and the buddy can talk without cutting each other off.
+# Voice "UT" (Unreal-Tournament-announcer style) -- passed in by --director-voice
+# or defaulted here; baked with this id regardless of the buddy --voice.
+DIRECTOR_VOICE = "YOq2y2Up4RgXP2HyXjE5"
+
+DIRECTOR = [
+    # -- level start (dir:start)
+    ("DDSTART0", "Welcome to the arena."),
+    ("DDSTART1", "Let the slaughter begin."),
+    ("DDSTART2", "Show me what you've got."),
+    # -- build-up / something stirs (dir:build)
+    ("DDBUILD0", "Something stirs in the dark."),
+    ("DDBUILD1", "They know you're here."),
+    ("DDBUILD2", "I'm only getting started."),
+    # -- single spawn (dir:spawn)
+    ("DDSPAWN0", "Reinforcements."),
+    ("DDSPAWN1", "Company."),
+    # -- horde / wave (dir:horde)
+    ("DDHORDE0", "Here comes the horde!"),
+    ("DDHORDE1", "Brace yourself."),
+    ("DDHORDE2", "All of them, at once."),
+    # -- peak intensity (dir:peak)
+    ("DDPEAK0", "Now it gets interesting."),
+    ("DDPEAK1", "No mercy."),
+    ("DDPEAK2", "Maximum carnage!"),
+    # -- special / big monster leans in (dir:big)
+    ("DDBIG0", "I saved this one for you."),
+    ("DDBIG1", "Meet your match."),
+    ("DDBIG2", "Try not to die too quickly."),
+    # -- relax / fade (dir:relax)
+    ("DDRELAX0", "Catch your breath. While you can."),
+    ("DDRELAX1", "We are not done."),
+    ("DDRELAX2", "A brief intermission."),
+    # -- relax item gift (dir:gift)
+    ("DDGIFT0", "A gift. Don't get comfortable."),
+    ("DDGIFT1", "You will need that."),
+    ("DDGIFT2", "Consider it charity."),
+    # -- emergency medkit (dir:heal)
+    ("DDHEAL0", "You're dying. How dull."),
+    ("DDHEAL1", "Not yet. I'm not finished with you."),
+    ("DDHEAL2", "Patch up. The show goes on."),
+    # -- emergency ammo (dir:ammo)
+    ("DDAMMO0", "Reload. I insist."),
+    ("DDAMMO1", "Empty already?"),
+    ("DDAMMO2", "Here. Make it count."),
+    # -- LLM tactic: flank (dir:flank)
+    ("DDFLANK0", "Cut him off."),
+    ("DDFLANK1", "From behind."),
+    # -- LLM tactic: ambush (dir:ambush)
+    ("DDAMBSH0", "Wait for it."),
+    ("DDAMBSH1", "Spring the trap."),
+    # -- LLM tactic: focus fire (dir:focus)
+    ("DDFOCUS0", "Finish the wounded one."),
+    ("DDFOCUS1", "Focus your fire."),
+    # -- LLM tactic: fall back (dir:fallback)
+    ("DDFALL0", "Pull them back. Regroup."),
+    ("DDFALL1", "Retreat. For now."),
+    # -- player on a spree (dir:spree)
+    ("DDSPREE0", "Impressive. For a human."),
+    ("DDSPREE1", "Enjoy it while it lasts."),
+    ("DDSPREE2", "Don't get cocky."),
+    # -- player near death / downed (dir:down)
+    ("DDDOWN0", "Pathetic."),
+    ("DDDOWN1", "Was that all?"),
+    ("DDDOWN2", "Get up."),
+    # -- a survivor DIED (dir:death)
+    ("DDDEATH0", "And that's a wrap."),
+    ("DDDEATH1", "One less marine."),
+    ("DDDEATH2", "I expected more."),
+    # -- level clear (dir:clear)
+    ("DDCLEAR0", "You survived. For now."),
+    ("DDCLEAR1", "Until next time."),
+    ("DDCLEAR2", "The next floor is worse."),
+    # -- long idle (dir:idle)
+    ("DDIDLE0", "Hiding won't help."),
+    ("DDIDLE1", "I can wait."),
+    ("DDIDLE2", "Tick. Tock."),
+]
+for _n, _p in DIRECTOR:
+    _lump(_n)   # enforce the 8-char Doom lump limit at import time
+_dirnames = [n for n, _ in DIRECTOR]
+assert len(_dirnames) == len(set(_dirnames)), "duplicate lump name in DIRECTOR"
+
+
+# ---------- ElevenLabs API ----------
+
+# Buddy voice id ("Joker-HL").  Stored HERE in tools/ -- it's only needed for the
+# offline bake; the game ships pre-baked OGGs (buddydoom.wad) and never does live TTS.
+DEFAULT_VOICE = "wJmFT75XSkFKaBF1R0rX"
+DEFAULT_MODEL = "eleven_turbo_v2_5"
+# ElevenLabs does NOT support ogg_vorbis (their docs say so; we tried).
+# We fetch MP3 (mp3_44100_128) and transcode to OGG/Vorbis with ffmpeg below.
+API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice}" \
+          "?output_format=mp3_44100_128&optimize_streaming_latency=0"
+
+
+def cfg_value(cfg_path, key):
+    """Read a 'key value' / 'key \"value\"' line from buddydoom.cfg."""
+    try:
+        with open(cfg_path) as f:
+            for line in f:
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2 and parts[0] == key:
+                    return parts[1].strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+# The 4-character prefixes tools/wad.gfx/ is allowed to hold.
+#
+# Everything in that directory is packed into buddydoom.wad's SPRITE namespace, and
+# buddydoom.wad is added AFTER the IWAD (files/d_main.c) -- so a stray file here does not
+# just sit around unused, its NAME wins any global by-name lookup.  NUKAGE1-3 and SFALL1-4
+# were once dropped in here, and the next bake would have shadowed the IWAD's nukage flats
+# and sludgefall texture patches with PNGs in the wrong namespace.
+#
+# Checking the name SHAPE is not enough to catch that: "SFALL1" is a perfectly well-formed
+# sprite lump name (SFAL + frame L + rotation 1).  Only a manifest catches it.  Adding new
+# art therefore means adding its prefix here -- one line, and the error message says so.
+GFX_PREFIXES = {
+    "MNDR", "SHT1", "POW1",                                 # security drone
+    "MTUR",                                                 # deployable turret
+    "LICS", "LICF", "LICE",                                 # Heretic Lichling
+    "STLK",                                                 # Strife stalker
+    "BUFD", "BUFE", "BUFG", "BUFK", "BUFO", "BUFS", "BUFT",  # buddy HUD mugshots
+    "RARR",                                                 # UI compass arrows
+    "PLA1", "PLA2", "PLA3", "PLA4",                         # Doom Delta buddy classes
+}
+
+
+def load_gfx_lumps():
+    """ALL buddy graphic lumps, as true-colour PNGs from tools/wad.gfx/ -- the single
+    source of truth for buddy art.  Covers the world SPRITES (MNDR*/MTUR*/SHT1*/POW1*
+    drone + turret, LICS*/LICF*/LICE* Lichling), the HUD mugshots (BUF*) and the UI
+    compass arrows (RARR*).  Everything is packed between S_START/S_END so R_InitSprites
+    picks up the sprite frames; the HUD/UI lumps are still found by name regardless.
+    (The old per-asset bakers -- bake_buddy_face / bake_secdrone sprites / bake_lichling
+    / patch_turret_sprites -- are gone; drop a PNG in wad.gfx and re-bake.)  Lump name =
+    filename stem, upper-cased."""
+    gfx_dir = Path(__file__).resolve().parent / "wad.gfx"
+    pngs = sorted(gfx_dir.glob("*.png"))
+
+    stray = sorted({f.name for f in pngs if f.stem.upper()[:4] not in GFX_PREFIXES})
+    if stray:
+        sys.exit(
+            "bake_buddy_voice: %s holds art with unknown prefixes:\n"
+            "    %s\n"
+            "Everything here becomes a lump in buddydoom.wad\'s SPRITE "
+            "namespace, and that WAD loads after the IWAD -- a name belonging to a "
+            "flat or a wall patch would shadow the real one.  If this really is "
+            "buddy sprite art, add its 4-character prefix to GFX_PREFIXES; "
+            "otherwise it does not belong here."
+            % (gfx_dir, "\n    ".join(stray)))
+
+    if not pngs:
+        print(f"WARNING: no *.png in {gfx_dir} -- buddy sprites/faces/arrows will be MISSING!",
+              file=sys.stderr)
+        return []
+    lumps = [("S_START", b"")]
+    lumps += [(f.stem.upper(), f.read_bytes()) for f in pngs]
+    lumps += [("S_END", b"")]
+    print(f"  + {len(pngs)} PNG gfx lumps from wad.gfx (S_START..S_END)")
+    return lumps
+
+
+def load_snd_lumps():
+    """ALL buddy sound lumps, from tools/wad.snd/ -- OGG/Vorbis (OggS magic) or raw DMX.
+    The engine's getsfx (i_sound.c) sniffs 'OggS' and decodes OGG via stb_vorbis, else
+    treats the bytes as a DMX effect; a BUDDYDEF see/pain/death/active field (or any
+    actor sound) references the lump by name -- I_SfxLumpFor tries 'DS'+name first, then
+    the bare name, so a lump DOG1 answers to sound "DOG1" or "dog1".  Not inside
+    S_START/S_END (that namespace is only for sprites); sound lumps are found by name.
+    Lump name = filename stem, upper-cased.  Drop a file in wad.snd and re-bake."""
+    snd_dir = Path(__file__).resolve().parent / "wad.snd"
+    files = (sorted(snd_dir.glob("*.ogg")) + sorted(snd_dir.glob("*.dmx"))
+             + sorted(snd_dir.glob("*.lmp")))
+    if not files:
+        return []
+    lumps = []
+    for f in files:
+        name = f.stem.upper()
+        if len(name) > 8:                       # WAD lump names are 8 bytes max
+            print(f"  ! wad.snd/{f.name}: lump name '{name}' >8 chars, truncating to '{name[:8]}'")
+            name = name[:8]
+        lumps.append((name, f.read_bytes()))
+    print(f"  + {len(files)} sound lumps from wad.snd")
+    return lumps
+
+
+def load_buddydef_lump():
+    """The companion roster, as a BUDDYDEF text lump read from tools/wad.buddydef.
+
+    P_Buddy_LoadDefs (files/p_buddydef.c) scans every loaded WAD for a lump of this
+    name, so shipping it inside buddydoom.wad is what puts the Doom Delta marines on
+    the Buddy select screen with no -file argument.  Slot 0 (Lorelei Chen) is built
+    into the engine and is deliberately NOT in this lump.
+
+    The parser is line-based: one key per line, `#` starts a comment, and `desc` is
+    capped at 160 characters -- a wrapped description silently loses everything after
+    its first line, so this checks rather than trusting the author.
+    """
+    src = Path(__file__).resolve().parent / "wad.buddydef"
+    if not src.is_file():
+        print(f"  ! {src} missing -- no BUDDYDEF lump, only the built-in buddy will be listed")
+        return []
+    text = src.read_text()
+    for n, line in enumerate(text.splitlines(), 1):
+        body = line.split("#", 1)[0].strip()
+        if body.lower().startswith("desc") and len(body) > 160 + 8:
+            print(f"  ! wad.buddydef:{n}: desc is longer than the engine's 160-char field")
+    print(f"  + BUDDYDEF roster lump ({text.count('buddy {')} record(s)) from wad.buddydef")
+    return [("BUDDYDEF", text.encode("utf-8"))]
+
+
+def env_file_value(path, *names):
+    """Read KEY=VALUE from a dotenv file (e.g. ~/.hermes/.env), trying each name.
+    Secrets (the ElevenLabs key) live HERE, never in buddydoom.cfg."""
+    try:
+        with open(os.path.expanduser(path)) as f:
+            env = {}
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                if k.startswith("export "):
+                    k = k[len("export "):].strip()
+                env[k] = v.strip().strip('"').strip("'")
+        for n in names:
+            if env.get(n):
+                return env[n]
+    except OSError:
+        pass
+    return None
+
+
+def fetch_mp3(phrase, voice, model, key, retries=3):
+    """POST to ElevenLabs TTS, return raw MP3 bytes (mp3_44100_128)."""
+    body = json.dumps({
+        "text": phrase,
+        "model_id": model,
+        "voice_settings": {
+            "stability": 0.4, "similarity_boost": 0.85, "style": 0.5,
+        },
+    }).encode()
+    req = urllib.request.Request(
+        API_URL.format(voice=voice),
+        data=body,
+        headers={"xi-api-key": key, "Content-Type": "application/json",
+                 "Accept": "audio/mpeg"},
+    )
+    last = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (429, 500, 502, 503, 504):
+                time.sleep(2 ** attempt)
+                continue
+            raise
+    raise last
+
+
+def _find_ffmpeg():
+    """Locate ffmpeg on PATH (we need it for MP3->OGG transcoding)."""
+    from shutil import which
+    for f in ("ffmpeg", "ffmpeg.exe"):
+        if which(f):
+            return f
+    return None
+
+
+def transcode_mp3_to_ogg(mp3_bytes, ffmpeg, trim_silence=True):
+    """Transcode MP3 bytes to OGG/Vorbis bytes using ffmpeg (in-memory).
+    With trim_silence=True (default), leading and trailing silence are
+    stripped via the silenceremove filter -- ElevenLabs TTS often pads
+    short phrases to ~30-42 seconds; without trim, "Contact!" would play
+    for almost a minute."""
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmpi:
+        tmpi.write(mp3_bytes); tmp_in = tmpi.name
+    tmp_out = tmp_in[:-4] + ".ogg"
+    try:
+        # silenceremove: strip silence >0.05s below -35dB at start/end.
+        # start_periods=1 means we keep audio up to the first non-silent
+        # stretch and drop everything before; same for end.
+        af = ("silenceremove=start_periods=1:start_duration=0.05:"
+              "start_threshold=-35dB:stop_periods=-1:stop_duration=0.05:"
+              "stop_threshold=-35dB") if trim_silence else "anull"
+        cmd = [ffmpeg, "-y", "-loglevel", "error",
+               "-i", tmp_in,
+               "-af", af,
+               "-c:a", "libvorbis", "-q:a", "5",  # ~96 kbps, good for speech
+               tmp_out]
+        subprocess.run(cmd, check=True, capture_output=True)
+        with open(tmp_out, "rb") as f:
+            return f.read()
+    finally:
+        for p in (tmp_in, tmp_out):
+            try: os.unlink(p)
+            except OSError: pass
+
+
+def fetch_ogg(phrase, voice, model, key, ffmpeg, trim_silence=True):
+    """End-to-end: fetch MP3 from ElevenLabs, return trimmed OGG/Vorbis bytes."""
+    mp3 = fetch_mp3(phrase, voice, model, key)
+    return transcode_mp3_to_ogg(mp3, ffmpeg, trim_silence=trim_silence)
+
+
+# ---------- Doom PWAD writer ----------
+
+# PWAD on-disk layout (little-endian), per Doom spec:
+#   header:      "PWAD" (4) + numlumps (4) + diroffset (4)              = 12 bytes
+#   lump data:   all lump bytes concatenated in directory order
+#   directory:   per-lump entry = filepos (4) + size (4) + name (8)    = 16 bytes
+# Directory is at the END of the file, not after the header.  Many loaders
+# accept both, but the Doom spec is unambiguous and `W_CheckNumForName` in
+# BuddyDoom's w_wad.c reads the directory from the file end (it was written
+# that way originally because files were streamed in order).
+def write_wad(out_path, lumps):
+    """`lumps` is a list of (8-char-name, bytes); writes a Doom PWAD."""
+    header_size = 12
+    data_off = header_size
+    # Lump data offsets are absolute within the file; compute them sequentially.
+    entries = []
+    cur = data_off
+    for name, data in lumps:
+        entries.append((cur, len(data), name))
+        cur += len(data)
+    dir_off = cur  # directory sits right after the lump data
+    # Header
+    with open(out_path, "wb") as f:
+        f.write(b"PWAD")
+        f.write(struct.pack("<II", len(lumps), dir_off))
+        # Lump data (no directory in between)
+        for _name, data in lumps:
+            f.write(data)
+        # Directory at end
+        for filepos, size, name in entries:
+            f.write(struct.pack("<II", filepos, size))
+            f.write(name.encode("ascii", "replace")[:8].ljust(8, b"\x00"))
+
+
+# ---------- main ----------
+
+def main():
+    ap = argparse.ArgumentParser(description="Bake BuddyDoom buddy voice into buddydoom.wad")
+    ap.add_argument("--voice", default=None,
+                    help="ElevenLabs voice id override (default: DEFAULT_VOICE in this "
+                         "tool -- Joker-HL)")
+    ap.add_argument("--director-voice", default=None,
+                    help="ElevenLabs voice id for the AI Director persona "
+                         "(default: DIRECTOR_VOICE in this tool -- 'UT')")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--key",   default=None)
+    ap.add_argument("--cfg",   default="buddydoom.cfg")
+    ap.add_argument("--out",   default="run/ID0/buddydoom.wad",
+                    help="output PWAD path (default: run/buddydoom.wad)")
+    ap.add_argument("--cache", default=".buddy_voice_cache",
+                    help="dir for raw OGGs (skips re-download on rerun)")
+    ap.add_argument("--force", action="store_true",
+                    help="redownload even if cached")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the phrase table, do not call ElevenLabs")
+    ap.add_argument("--offline-test", action="store_true",
+                    help="skip ElevenLabs; emit 0.3s sine-tone OGGs via ffmpeg "
+                         "for smoke-testing the engine pipeline without API quota")
+    ap.add_argument("--no-trim", action="store_true",
+                    help="keep leading/trailing silence in OGGs "
+                         "(default: trim via ffmpeg silenceremove)")
+    args = ap.parse_args()
+
+    # Voice id lives in tools/ (DEFAULT_VOICE below) -- it's only used here, offline,
+    # when baking buddydoom.wad; the game just plays the pre-baked OGGs, never live TTS.
+    # NOT in buddydoom.cfg.  --voice can override for a one-off bake.
+    args.voice = args.voice or DEFAULT_VOICE
+
+    out_path = Path(args.out).resolve()
+    cache_dir = Path(args.cache).resolve()
+
+    if args.dry_run:
+        print(f"voice={args.voice} model={args.model}")
+        print(f"phrases ({len(PHRASES)}):")
+        for name, phrase in PHRASES:
+            print(f"  {name}  <-  {phrase!r}")
+        print(f"would write -> {out_path}")
+        return 0
+
+    # Offline-test mode: synthesise sine-tone OGGs with ffmpeg.  Useful for
+    # smoke-testing the engine's OGG-decode + audio-stream pipeline without
+    # burning ElevenLabs quota.  No key required.
+    if args.offline_test:
+        import subprocess
+        for f in ("ffmpeg", "ffmpeg.exe"):
+            from shutil import which as _which
+            if _which(f):
+                FFMPEG = f
+                break
+        else:
+            print("ERROR: --offline-test needs ffmpeg on PATH.", file=sys.stderr)
+            return 2
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        lumps = []
+        manifest_lines = []
+        print(f"bake_buddy_voice: OFFLINE-TEST mode (sine-tone OGGs) -> {out_path}")
+        for i, (name, phrase) in enumerate(PHRASES, 1):
+            cached = cache_dir / f"{name}_offline.ogg"
+            # 220 Hz base + 11 Hz per index so each phrase is a distinct tone
+            freq = 220 + i * 11
+            # No trim in offline-test (sine has no silence to remove).
+            af = "anull"
+            cmd = [FFMPEG, "-y", "-loglevel", "error",
+                   "-f", "lavfi",
+                   "-i", f"sine=frequency={freq}:duration=0.3",
+                   "-af", af,
+                   "-c:a", "libvorbis", "-q:a", "0",
+                   str(Path(cached).resolve())]
+            subprocess.run (cmd, check=True, capture_output=True)
+            data = cached.read_bytes()
+            lumps.append((name, data))
+            manifest_lines.append(f"{name}\t{phrase}\toffline-sine({freq}Hz)\t{len(data)}\n")
+            print(f"  [{i:2d}/{len(PHRASES)}] {name}  '{phrase}' -> {freq} Hz")
+        lumps += load_gfx_lumps()	# all buddy graphics (sprites + HUD faces + arrows)
+        lumps += load_snd_lumps()  # all buddy sounds from wad.snd
+        lumps += load_buddydef_lump()  # the companion roster (Doom Delta marines)
+        manifest_txt = (f"OFFLINE-TEST MODE (sine tones)\n"
+                        f"generated={time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        + "".join(manifest_lines))
+        lumps.append(("VOICEMAP", manifest_txt.encode("utf-8")))
+        write_wad(out_path, lumps)
+        (out_path.parent / "buddydoom_voice_manifest.txt").write_text(manifest_txt)
+        total = sum(len(d) for _n, d in lumps)
+        print(f"\nbake_buddy_voice: wrote {out_path}  ({len(lumps)} lumps, {total} bytes)")
+        return 0
+
+    # Key precedence: --key > env var > ~/.hermes/.env.  NEVER buddydoom.cfg -- secrets
+    # don't belong in the game config (which can be shared / committed by accident).
+    key = args.key or os.environ.get("ELEVENLABS_API_KEY") \
+          or env_file_value("~/.hermes/.env",
+                            "ELEVENLABS_API_KEY", "ELEVEN_API_KEY", "XI_API_KEY")
+    # A key is only needed for clips we would have to SYNTHESISE.  With tools/wad.voice/
+    # complete the bake is a pure repack, and demanding a key there would keep the WAD
+    # unbuildable for everyone but its original author -- which is the state this folder
+    # exists to end.
+    if not key:
+        voice_dir = Path(__file__).resolve().parent / "wad.voice"
+        missing = [n for n, _p in PHRASES] + [n for n, _p in DIRECTOR]
+        missing = [n for n in missing if not (voice_dir / f"{n[:8]}.ogg").exists()]
+        if missing:
+            print("ERROR: no ElevenLabs API key, and %d clip(s) are not pre-baked in %s "
+                  "(first: %s).  Put 'ELEVENLABS_API_KEY=sk_...' in ~/.hermes/.env "
+                  "(preferred), export ELEVENLABS_API_KEY, or pass --key."
+                  % (len(missing), voice_dir, ", ".join(missing[:4])), file=sys.stderr)
+            return 2
+        print("bake_buddy_voice: no API key, but every clip is pre-baked in wad.voice/ "
+              "-- repacking offline.")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"bake_buddy_voice: voice={args.voice} model={args.model}")
+    print(f"  cache={cache_dir}\n  out={out_path}")
+    print(f"  {len(PHRASES)} phrases\n")
+
+    lumps = []
+    manifest_lines = []
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        print("ERROR: ffmpeg not found on PATH (needed for MP3->OGG transcode).",
+              file=sys.stderr)
+        return 2
+    # Bake the buddy phrases (args.voice) AND the Director phrases (DIRECTOR_VOICE)
+    # in one pass; each entry carries its own voice id.  The cache key includes the
+    # voice, so the two personas never collide even on an identical phrase.
+    director_voice = args.director_voice or DIRECTOR_VOICE
+    ALL = [(n, p, args.voice) for n, p in PHRASES] \
+        + [(n, p, director_voice) for n, p in DIRECTOR]
+    voice_dir = Path(__file__).resolve().parent / "wad.voice"
+    for i, (name, phrase, voice) in enumerate(ALL, 1):
+        # PRE-BAKED first.  tools/wad.voice/ holds the shipped clips, one OGG per lump,
+        # named exactly as the lump is (so >8-char entries use the truncated form that
+        # write_wad would produce anyway).  Without this the bake was not reproducible:
+        # the clips only existed inside buddydoom.wad, and the content-addressed cache
+        # that would otherwise supply them was never committed -- so anyone re-baking
+        # got a WAD with the voice gone, or an ElevenLabs bill.
+        prebaked = voice_dir / f"{name[:8]}.ogg"
+        if prebaked.exists() and not args.force:
+            data = prebaked.read_bytes()
+            src = "prebaked"
+            lumps.append((name, data))
+            persona = "director" if name.startswith("DD") else "buddy"
+            manifest_lines.append(f"{name}\t{persona}\t{voice}\t{phrase}\t{src}\t{len(data)}\n")
+            continue
+        # Cache key is content-addressed on phrase+voice+model so different
+        # voices land in separate files.
+        h = hashlib.sha1(f"{voice}|{args.model}|{phrase}".encode()).hexdigest()[:16]
+        cached = cache_dir / f"{name}_{h}.ogg"
+        if cached.exists() and not args.force:
+            data = cached.read_bytes()
+            src = "cached"
+        else:
+            print(f"  [{i:2d}/{len(ALL)}] {name}  '{phrase}' ...", end="", flush=True)
+            try:
+                data = fetch_ogg(phrase, voice, args.model, key, ffmpeg,
+                                  trim_silence=not args.no_trim)
+            except Exception as e:
+                print(f" FAILED: {e}", file=sys.stderr)
+                return 3
+            cached.write_bytes(data)
+            print(f" {len(data)} bytes")
+            src = "fetched"
+            # Be polite to the API
+            time.sleep(0.3)
+        lumps.append((name, data))
+        # lump <TAB> persona <TAB> voice-id <TAB> phrase <TAB> src <TAB> bytes
+        persona = "director" if name.startswith("DD") else "buddy"
+        manifest_lines.append(f"{name}\t{persona}\t{voice}\t{phrase}\t{src}\t{len(data)}\n")
+
+    lumps += load_gfx_lumps()		# all buddy graphics (sprites + HUD faces + arrows)
+    lumps += load_snd_lumps()  # all buddy sounds from wad.snd
+    lumps += load_buddydef_lump()  # the companion roster (Doom Delta marines)
+
+    # Pack the lump<->phrase mapping INTO the WAD as a text lump ("VOICEMAP") so the
+    # WAD is self-documenting -- no external file needed to know what each lump says.
+    # Columns: lump  persona  voice-id  phrase  source  bytes.
+    manifest_txt = (f"buddy_voice={args.voice}\ndirector_voice={director_voice}\n"
+                    f"model={args.model}\n"
+                    f"generated={time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"# columns: lump\\tpersona\\tvoice\\tphrase\\tsource\\tbytes\n\n"
+                    + "".join(manifest_lines))
+    lumps.append(("VOICEMAP", manifest_txt.encode("utf-8")))
+
+    write_wad(out_path, lumps)
+
+    # ... and a copy next to the WAD for reproducibility/grep.
+    (out_path.parent / "buddydoom_voice_manifest.txt").write_text(manifest_txt)
+
+    total = sum(len(d) for _n, d in lumps)
+    print(f"\nbake_buddy_voice: wrote {out_path}  ({len(lumps)} lumps, {total} bytes)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
