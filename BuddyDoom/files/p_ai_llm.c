@@ -953,8 +953,27 @@ static void AI_PollSocket (void)
     {
 	char ch;
 	r = read (client_fd, &ch, 1);
-	if (r == 0) { close(client_fd); client_fd = -1; return; }	// closed
-	if (r < 0) { /* EAGAIN: nothing more this tic */ return; }
+	if (r == 0)
+	{   // Graceful close (FIN) -- drop the client and re-arm the accept loop.
+	    close(client_fd); client_fd = -1; return;
+	}
+	if (r < 0)
+	{
+#ifdef _WIN32
+	    int err = WSAGetLastError ();
+	    if (err == WSAEWOULDBLOCK)
+		return;		// nothing more this tic
+	    // An ABRUPT client death (RST) surfaces on Windows as an error, not
+	    // as read()==0.  Previously any r<0 left the dead client installed,
+	    // so accept() was never re-armed and the listener wedged until the
+	    // game was restarted.  Treat every hard socket error as disconnect.
+	    close(client_fd); client_fd = -1; return;
+#else
+	    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+		return;		// nothing more this tic
+	    close(client_fd); client_fd = -1; return;	// hard error: drop + re-accept
+#endif
+	}
 	if (ch == '\n')
 	{
 	    linebuf[linelen] = 0;

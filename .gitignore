@@ -1,2 +1,11 @@
 # Intentionally empty — this repo tracks ALL files, including binaries,
 # build outputs, SDKs, and runtime artifacts (owner's explicit choice).
+#
+# EXCEPTION (added 2026-09-30): secret material. The ONLY allowed ignore rules.
+.env
+.env.*
+*.key
+jev/.env
+jev/.env.*
+nemesis/.env
+nemesis/.env.*
