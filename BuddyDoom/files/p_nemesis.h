@@ -70,4 +70,9 @@ void		NEM_Init (void);
 // Save + reset (call from I_Quit).
 void		NEM_Quit (void);
 
+// Live metrics HUD (display-only; set by the external RL agent via
+// "nemesis ... hud=ep=N,eps=F,r=F,surv=F,act=NAME" lines).
+void		NEM_HUDSet (const char* hud_spec);
+void		NEM_HUDPrint (void);
+
 #endif

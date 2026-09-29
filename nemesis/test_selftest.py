@@ -138,9 +138,12 @@ def main() -> int:
     mock.start()
 
     tmpdir = tempfile.mkdtemp(prefix="nemesis_selftest_")
+    lifecycle: list[tuple[str, dict]] = []
     t0 = time.monotonic()
     try:
-        tracker = rl_agent.run(max_seconds=2.0, port=mock.port, log_dir=tmpdir)
+        learner = rl_agent.run(max_seconds=2.0, port=mock.port, log_dir=tmpdir,
+                               qtable_path=os.path.join(tmpdir, "qtable.json"),
+                               listener=lambda ev, inf: lifecycle.append((ev, inf)))
     finally:
         config.POLL_PERIOD, config.ORDER_REFRESH_POLLS, config.RESPAWN_COOLDOWN = real
     dt = time.monotonic() - t0
@@ -174,8 +177,14 @@ def main() -> int:
     # id freshness: after the roster change the agent must target id 5
     check(any("ids=5" in c for c in acts), f"never re-targeted new id 5: {acts}")
 
-    # episodes: alive(3) -> death -> alive(6) == 2 episodes
-    check(tracker.episode == 2, f"expected 2 episodes, got {tracker.episode}")
+    # lifecycle: exactly one terminal episode end in the scripted stream
+    # (id 6's death is cut off by the time limit)
+    ends = [inf for ev, inf in lifecycle if ev == "episode_end"]
+    starts = [inf for ev, inf in lifecycle if ev == "episode_start"]
+    check(len(ends) == 1, f"expected 1 episode_end, got {len(ends)}: {lifecycle}")
+    check(len(starts) >= 2, f"expected >=2 episode_start, got {len(starts)}")
+    check(ends[0]["terminal_r"] < 0, "nemesis-death terminal must be negative")
+    check(learner.q.episode == 1, f"learner completed {learner.q.episode} episodes, expected 1")
 
     # logs coherent
     with open(os.path.join(tmpdir, "obs.jsonl"), encoding="utf-8") as f:
@@ -185,7 +194,7 @@ def main() -> int:
     check(len(obs_lines) >= 8, f"too few observations logged: {len(obs_lines)}")
     check(all("obs" in o and "poll" in o for o in obs_lines), "obs log malformed")
     check(all("order" in a and "reply" in a for a in act_lines), "act log malformed")
-    check(all(a["ep"] in (1, 2) for a in act_lines), f"episode tags wrong: {act_lines}")
+    check(all(a["ep"] in (0, 1, 2) for a in act_lines), f"episode tags wrong: {act_lines}")
 
     if failures:
         print("SELFTEST FAIL:")
@@ -193,7 +202,7 @@ def main() -> int:
             print("  -", f_)
         return 1
     print(f"SELFTEST PASS: {len(cmds)} commands, {len(obs_lines)} observations, "
-          f"{tracker.episode} episodes in {dt:.1f}s")
+          f"{learner.q.episode} completed episodes, lifecycle {len(lifecycle)} events, {dt:.1f}s")
     return 0
 
 

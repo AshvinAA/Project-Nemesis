@@ -30,6 +30,9 @@
 #include "info.h"		// mobjinfo_t
 #include "d_items.h"		// weaponinfo
 #include "p_nemesis.h"
+
+// Console text (metrics HUD). Matches c_console.c's signature.
+void C_Printf (const char* fmt, ...);
 #include "p_mobj.h"
 
 // ---------------------------------------------------------------------------
@@ -42,7 +45,13 @@
 #define NEM_BCEIL	 1.0f
 #define NEM_MAXPROPOSAL	0.5f		// max |delta| per proposal line
 #define NEM_DECAY	0.995f		// per-second multiplicative decay toward 1
-#define NEM_EVENTMAX	16		// event ring size (labels observed by bridge)
+#define NEM_EVENTMAX	64		// event ring size (labels observed by bridge).
+				// was 16: under sustained fire the ring overflowed
+				// between 10 Hz polls and the Python RL agent lost
+				// hit/kill events (reward signal fidelity). 64*48B = 3 KB.
+				// (Serializer still skips the whole nemesis block when
+				// the observe buffer is tight -- the agent's event cursor
+				// is updated only on snapshots that CARRY the block.)
 
 #define NEM_TYPES	14		// rows below
 #define NEM_WEAPONS	9
@@ -506,4 +515,38 @@ void NEM_Init (void)
     nem_event_count = 0;
     nem_initialized = 1;
     NEM_Load ();
+}
+
+// ---------------------------------------------------------------------------
+// Live metrics HUD (Project Nemesis RL). The external Python agent piggybacks
+// a hud= spec on its act/spawn lines; we store it verbatim (parsed at print
+// time) and re-print at ~1 Hz so the recording shows the learning live:
+//   episode count, epsilon, last reward, avg survival, current action.
+// Display ONLY -- never influences play. Stale display: if the agent dies,
+// lines stop updating; a (stale) marker makes that visible in the recording.
+// ---------------------------------------------------------------------------
+
+#define NEM_HUD_MAX	96
+static char		nem_hud[NEM_HUD_MAX];
+static unsigned		nem_hud_stamp;		// gametic of last NEM_HUDSet
+
+void NEM_HUDSet (const char* hud_spec)
+{
+    if (!hud_spec || !*hud_spec) return;
+    strncpy (nem_hud, hud_spec, sizeof(nem_hud) - 1);
+    nem_hud[sizeof(nem_hud) - 1] = 0;
+    nem_hud_stamp = (unsigned) gametic;
+}
+
+void NEM_HUDPrint (void)
+{
+    static int next_print;
+    if (!nem_hud[0]) return;
+    if ((int)gametic < next_print) return;
+    next_print = (int)gametic + TICRATE;
+    // staler than 10 s -> the agent is gone; say so once per print slot
+    if ((unsigned)(gametic - (int)nem_hud_stamp) > 10u * TICRATE)
+	C_Printf ("[nemesis] (stale) %s\n", nem_hud);
+    else
+	C_Printf ("[nemesis] %s\n", nem_hud);
 }

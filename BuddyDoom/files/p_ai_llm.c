@@ -855,6 +855,9 @@ static void AI_HandleLine (char* line, int client)
 		NEM_Propose (type_s, key, "");
 	    }
 	    else if (!strcmp(kv,"bias") && type_s[0]) NEM_Propose (type_s, "bias", eq);
+	    // Project Nemesis RL: piggybacked metrics spec (display only).
+	    // hud=ep=3,eps=0.12,r=-98.1,surv=8.4,act=flank_left
+	    else if (!strcmp(kv,"hud")) NEM_HUDSet (eq);
 	}
 	if (client >= 0) (void)!write (client, "ok\n", 3);
 	return;
@@ -1172,7 +1175,7 @@ void P_AI_Ticker (void)
     // persists for minutes.  Runs in every mode (rule director consumes it too).
     {
 	static int nem_decay_tic;
-	if (gametic - nem_decay_tic >= TICRATE) { nem_decay_tic = gametic; NEM_DecayPass (); }
+	if (gametic - nem_decay_tic >= TICRATE) { nem_decay_tic = gametic; NEM_DecayPass (); NEM_HUDPrint (); }
     }
 
     if (!ai_on || !ai_enabled)

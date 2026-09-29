@@ -125,17 +125,24 @@ class DirectorLink:
         return data if isinstance(data, dict) else None
 
     def act(self, order: str, ids: list[int], for_tics: int = config.ORDER_FOR_TICS,
-            x: Optional[int] = None, y: Optional[int] = None) -> Optional[str]:
+            x: Optional[int] = None, y: Optional[int] = None,
+            hud: Optional[str] = None) -> Optional[str]:
         parts = [f"act order={order}", f"ids={','.join(str(i) for i in ids)}"]
         if x is not None:
             parts.append(f"x={x}")
         if y is not None:
             parts.append(f"y={y}")
         parts.append(f"for={for_tics}")
+        if hud:
+            parts.append(f"hud={hud}")   # piggybacked metrics (display only, C-side)
         return self.request(" ".join(parts))
 
-    def spawn(self, mtype: str, count: int = 1) -> Optional[str]:
-        return self.request(f"spawn type={mtype} count={count}")
+    def spawn(self, mtype: str, count: int = 1,
+              hud: Optional[str] = None) -> Optional[str]:
+        line = f"spawn type={mtype} count={count}"
+        if hud:
+            line += f" hud={hud}"
+        return self.request(line)
 
     def nemesis_propose(self, mtype: str, deltas: list[str]) -> Optional[str]:
         return self.request(f"nemesis propose={mtype} " + " ".join(deltas))

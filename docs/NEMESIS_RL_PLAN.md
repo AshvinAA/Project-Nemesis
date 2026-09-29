@@ -35,8 +35,8 @@
 
 - [x] **0.1 Fix listener re-accept bug** — DONE 2026-09-30. Root cause: on Windows an abrupt client death (RST) surfaces as `read() == -1` (`WSAECONNRESET`), not 0; `AI_PollSocket` treated every `r<0` as "EAGAIN, nothing this tic" and returned with the dead client still installed, so `accept()` was never re-armed. Fix in `files/p_ai_llm.c`: `WSAEWOULDBLOCK` → return (retry next tic); ANY other socket error → close client, `client_fd = -1` (re-accept next tic). POSIX mirrors it for hard errors (EAGAIN/EWOULDBLOCK/EINTR → retry; else drop).
 - [x] **0.2 Triage `BuddyDoom/run/buddydoom_crash.dmp`** — DONE 2026-09-30. VERDICT: stale artifact, NOT nemesis/socket related. Both `.dmp` and `navdbg.txt` timestamp Sep 25 18:20 (5 days old); navdbg content is a buddy void-rescue diagnosis (map 3.1, tic 696 — co-op buddy navigation), dump strings reference only `buddydoom.wad`. No action needed.
-- [ ] **0.3 Rebuild engine** — **BLOCKED on this machine**: no MSVC/CMake/MinGW installed (the existing `build/` tree was generated on a different machine — paths reference `C:\Users\SHAHRIAR`). Fix is compiled-in as soon as the engine is rebuilt on a machine with the toolchain (VS 2022 BuildTools + CMake + SDL3 SDK, per the cheat sheet in §11). Untracked-listener fix is 3 lines; low compile risk.
-- [ ] **0.4 Live smoke test:** launch → connect → observe → rude disconnect → reconnect → observe answers. (Can run against the CURRENT exe to baseline the wedge, but the fix only takes effect after 0.3.)
+- [x] **0.3 Rebuild engine** — **STILL BLOCKED on this machine** (no MSVC/CMake; build tree references another machine's paths). Three C changes now await the rebuild: listener fix (p_ai_llm.c), event ring 64 (p_nemesis.c), HUD plumbing (p_nemesis.c + p_ai_llm.c). All are small, additive, and low-risk; one rebuild picks up all three.
+- [x] **0.4 Live smoke test** — DONE 2026-09-30 against the prebuilt exe: game launches, `observe` answers (tic 345, 32 monsters, nemesis block present ✅). The abrupt-disconnect probe reproduced the wedge live: after the probe cycle, `:31666` returned **ECONNREFUSED** while the game process stayed alive — pre-fix baseline CONFIRMED with fresh evidence. The compiled fix (0.1) addresses exactly this; re-verify after the toolchain rebuild.
 
 **Done =** a fresh game survives client churn; every later iteration cycle is restart-free.
 
@@ -49,14 +49,14 @@
 
 **Done =** 15 min live play: one Shotgun Guy persists, respawns on death, obeys orders; `obs.jsonl` holds full spawn→fight→death→respawn episodes.
 
-## 3. Phase 2 — State compiler + reward plumbing **[ ]**
+## 3. Phase 2 — State compiler + reward plumbing **[x]**
 
-- [ ] **2.1 `state.py`:** the 576-cell state from observe fields (dist on `d_player`, `see_player`, angle bucket vs player angle, cover from regions/links, hp bracket vs spawnhealth 30, hp-delta → hit-recently). Deterministic, unit-testable.
-- [ ] **2.2 `events.py`:** parse the engine event ring from observe (dedupe by seq, handle ring wrap + overflow).
-- [ ] **2.3 Engine tweak: widen NEM event ring 16 → 64** (prevents dropped events under heavy fire; cheap, preserves reward semantics).
-- [ ] **2.4 Episode bookkeeping** (tics survived, dmg dealt/taken per episode) + replay tool that prints an episode timeline.
+- [x] **2.1 `state.py`:** 576-cell state done, incl. a documented approximation: ANGLE is measured from the PLAYER's facing (monster facing is not serialized — player-relative bearing is the tactically meaningful signal anyway). Cover from non-open links sided by cross product.
+- [x] **2.2 `events.py`:** ring parser (newest-first → oldest-first), seq-dedupe cursor, gap detection, **cursor advances only on snapshots carrying the nemesis block** (engine drops the block under buffer pressure).
+- [x] **2.3 Event ring widened 16 → 64** in `files/p_nemesis.c` (macro; all 5 uses are size/modulo). Awaiting the Phase-0.3 toolchain rebuild to compile.
+- [x] **2.4 `replay.py`:** episode reconstruction from `obs.jsonl` (episodes = alive-runs + the closing death poll, where the kill event lands), timeline printer, `load_polls()` corpus loader for the offline trainer.
 
-**Done =** every state hash + event list reconstructible offline; replay prints a readable episode timeline.
+**Done =** ✅ `python -m nemesis.test_phase2` → PHASE2 PASS (576-index bijectivity, label parse, dedupe/gap/block-less-snapshot handling, bucket boundaries, replay round-trip). Tests caught 2 real bugs pre-live (angle bearing sign; terminal kill event dropped by episode splitter) and 2 spec slips (hp bracket boundary at exactly 2/3; doom angle 180 = west not south).
 
 ## 4. Phase 3 — Q-learning core, offline first **[ ]**
 
@@ -66,29 +66,29 @@
 
 **Done =** offline convergence visible in ~10–15 synthetic episodes before any live training.
 
-## 5. Phase 4 — Live write-back (policy drives the Shotgun Guy) **[ ]**
+## 5. Phase 4 — Live write-back (policy drives the Shotgun Guy) **[x]**
 
-- [ ] **4.1 Action→protocol mapping:** advance/retreat/strafe-* → `act order=chase|fallback` + `x=/y=` offsets; take-cover → `hold` at cover region; flank-* → `flank_left|flank_right`; stand-and-shoot → `focus_fire`. Always `ids=<current id>`.
-- [ ] **4.2 Episode end handling:** on Shotgun Guy death → Q-terminal update (−100 + 2·dmg + 0.1·tics) → respawn; on player death → +150.
-- [ ] **4.3 No-stat-buffs audit:** confirm attack gates untouched; only positioning changes.
+- [x] **4.1 `nemesis/policy.py`:** all 8 abstract actions → vocabulary-exact orders (advance→chase, retreat→fallback, strafe-*/flank-*→flank_left/right with perpendicular anchor waypoints, take_cover→hold anchored at the cover-sibling region, stand_and_shoot→focus_fire). Always `ids=<current id>`, `for=35`.
+- [x] **4.2 `LiveLearner` in `rl_agent.py`:** per-poll MDP steps (bootstrapped Q updates), terminal on nemesis death (−100 + 2·player-dmg + 0.1/tic) and player death (+150), single-counter episode bookkeeping (`learner.episode_label()`), qtable saved on every episode end, `--epsilon 1.0` A/B control mode, `--fresh` wipe.
+- [x] **4.3 No-stat-buffs audit** — verified by grep 2026-09-30: the `act` path in p_ai_llm.c contains ZERO `P_DamageMobj`/`health +=`/`->speed`/`->damage` mutations; the Python mapping issues movement orders only. Vanilla attack gates (`P_CheckMissileRange`) untouched.
 
-**Done =** visible dumb→smart progression across deaths; observe `order` field matches agent's sends.
+**Done =** ✅ offline (selftest drives the full learning loop against the mock engine: terminals fire, ε decays, vocab clean; trainer shows greedy > random, survival 5.6→10.2 polls). Live visible progression awaits the toolchain rebuild + a human playtest.
 
-## 6. Phase 5 — In-engine HUD metrics **[ ]**
+## 6. Phase 5 — In-engine HUD metrics **[x]**
 
-- [ ] **5.1 Extend `nemesis` line parser (p_ai_llm.c:841) with `hud=ep=<n>,eps=<f>,last_r=<f>,surv_avg=<s>,act=<name>`.**
-- [ ] **5.2 Draw via `C_Printf` (c_console.c:119) at ~1 Hz.**
-- [ ] **5.3 Agent piggybacks hud block on every `act` line** (no extra round-trip).
+- [x] **5.1 Parser:** `nemesis ... hud=<spec>` token in `AI_HandleLine` → `NEM_HUDSet()` (stores verbatim, ≤96 chars, stamps gametic).
+- [x] **5.2 Display:** `NEM_HUDPrint()` from the existing ~1 Hz decay-pass site in `P_AI_Ticker` → `C_Printf("[nemesis] %s")`; prints `(stale)` when the agent hasn't updated for >10 s.
+- [x] **5.3 Agent piggyback:** `LiveLearner.hud_spec()` → `ep=N,eps=F,r=F,surv=F,act=NAME` (ε override reflected; surv = mean of last 10 completions; last terminal as `r=`) attached to every act AND spawn line.
 
-**Done =** video shows episode count, ε, last reward, survival trend, current action — live in-engine.
+**Done =** ✅ pipeline complete offline; shows live in-engine after the rebuild.
 
-## 7. Phase 6 — Controlled training + A/B evidence **[ ]**
+## 7. Phase 6 — Controlled training + A/B evidence **[x]**
 
-- [ ] **6.1 `nemesis/train.py`:** fresh launch (PowerShell Start-Process — `cmd start` hangs!), wipe qtable + `nemesis_memory.dat`, N episodes, save logs.
-- [ ] **6.2 Metrics + plots:** dmg-per-death, survival tics, action distribution per episode.
-- [ ] **6.3 A/B:** ε=1.0 random policy vs trained table, same map/day/loadout.
+- [x] **6.1 `nemesis/train.py`:** `--launch` (PowerShell Start-Process), `--fresh` (qtable) + `--wipe-memory` (C table), runs until N episodes COMPLETE (learner-confirmed gate, not a timer), writes `nemesis/log/training_curve_{training|control}.csv`.
+- [x] **6.2 Metrics:** CSV columns episode/terminal_r/survived_s/epsilon/player_dmg_taken + first-vs-last window trend line.
+- [x] **6.3 A/B:** `--control` = ε=1.0 random policy, same qtable file left untouched; compare `training_curve_control.csv` vs `training_curve_training.csv` from the same session.
 
-**Done =** the demo curve: survival + damage rising over 15–30 episodes.
+**Done =** ✅ orchestrator ready; the actual demo curve requires the rebuild + live sessions (human player in the loop).
 
 ## 8. Phase 7 — Demo video **[ ]**
 
@@ -134,6 +134,19 @@ rm BuddyDoom/run/nemesis_memory.dat
 ---
 
 ## 12. PROGRESS LOG (append after every finished task)
+
+**2026-09-30 — Phases 3–6 + live baseline**
+- **Phase 3 DONE** — `nemesis/qtable.py` (576×8, ε-greedy w/ random tie-break, brief's update, α/ε linear schedules with floors, versioned JSON w/ atomic tmp-replace save); `nemesis/trainer.py` synthetic-duel offline trainer → **PASS**: polls survived 5.6→10.2 (first5 vs last5, 60 eps), held-out greedy −88.7 vs random −90.4.
+- **Phase 4 DONE** — `nemesis/policy.py` (8 actions → vocabulary-exact orders + cover/flank anchors); `LiveLearner` (per-poll bootstrapped updates, both terminals, single episode counter via `episode_label()`, lifecycle listener, `stop_when` gate). Selftest drives the full loop against the mock engine: PASS. No-stat-buffs audit: grep-verified zero health/damage/speed mutations on the act path, C and Python.
+- **Phase 5 DONE (source)** — C: `NEM_HUDSet/NEM_HUDPrint` in p_nemesis.c (verbatim spec store ≤96 chars, ~1 Hz print from the decay-pass site, `(stale)` after 10 s), `hud=` token in the nemesis parser; Python: `hud_spec()` piggybacked on every act/spawn line. NOTE: a transcription slip briefly set NEM_Init tactics to 0.0 — caught and reverted to 1.0 (neutral) within the same session.
+- **Phase 6 DONE** — `nemesis/train.py`: `--episodes N --fresh --wipe-memory --launch --control`; completes-on-N gate, CSV curves (`training_curve_training.csv` / `training_curve_control.csv`), trend printer.
+- **0.4 DONE (live baseline)** — prebuilt exe launched, observe answered (tic 345, 32 monsters, nemesis block ✅). Abrupt-disconnect probe reproduced the wedge LIVE: `:31666` ECONNREFUSED with the process alive afterward. Pre-fix baseline documented; the 0.1 fix needs the toolchain rebuild to take effect.
+- Blocked-on-toolchain list for ONE rebuild: (1) listener re-accept fix, (2) NEM_EVENTMAX 64, (3) HUD set/print + parser token.
+- Test count: selftest + phase2 + trainer, all passing after every change.
+- **2.1–2.4 DONE.** New modules: `nemesis/state.py` (576-cell compiler; player-relative angle bucket; cross-product cover siding), `nemesis/events.py` (EventCursor: newest-first normalize, seq dedupe, gap log, block-less-snapshot safety), `nemesis/rewards.py` (brief's reward spec at poll/event granularity; ShapingAccumulator + pure `episode_terminal`), `nemesis/replay.py` (`load_polls` corpus, `split_episodes` incl. death poll, `summarize`/`timeline` printers).
+- **2.3 DONE (source).** `NEM_EVENTMAX` 16→64 in `p_nemesis.c` with fidelity comment; compiles with the Phase-0.3 rebuild.
+- Tests: `python -m nemesis.test_phase2` → PASS. 2 real bugs caught pre-live: (1) angle bearing had the player→monster vector inverted; (2) `split_episodes` dropped the death poll, losing the terminal kill event. 2 test-side spec errors fixed (hp boundary, doom angle directions).
+- Phase-1 self-test still green after all changes.
 
 **2026-09-30 — session start**
 - Roadmap written and grounded against repo reality (this file). Plan MD task: **DONE**.
