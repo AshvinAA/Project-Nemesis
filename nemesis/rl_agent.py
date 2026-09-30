@@ -33,6 +33,9 @@ from .events import EventCursor
 from .rewards import ShapingAccumulator, episode_terminal
 from .qtable import QTable
 from .policy import action_to_order
+from .curriculum import SkillCurriculum
+from .livestate import LiveState
+from .dashboard import start as start_dashboard
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), "log")
 
@@ -185,7 +188,7 @@ class LiveLearner:
 def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
         log_dir: str = LOG_DIR, qtable_path: Optional[str] = None,
         epsilon: Optional[float] = None, fresh: bool = False,
-        listener=None, stop_when=None) -> LiveLearner:
+        listener=None, stop_when=None, dashboard: bool = True) -> LiveLearner:
     os.makedirs(log_dir, exist_ok=True)
     obs_log = open(os.path.join(log_dir, "obs.jsonl"), "a", encoding="utf-8")
     act_log = open(os.path.join(log_dir, "acts.jsonl"), "a", encoding="utf-8")
@@ -194,13 +197,41 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
         os.remove(qtable_path)
         print(f"[nemesis] wiped {qtable_path}")
 
+    link = DirectorLink(port=port or config.DIRECTOR_PORT)
+    curriculum = SkillCurriculum(link)
+    live = LiveState()
+
+    def _tap(event: str, info: dict) -> None:
+        """Feed the dashboard ticker and run the curriculum promotion wave
+        on episode end (engine-earned lessons are absorbed via reconcile)."""
+        if event == "episode_start":
+            live.log_event(f"ep {info.get('episode')} started — nemesis alive")
+        elif event == "episode_end":
+            live.log_event(f"ep {info.get('episode')} ended: terminal "
+                           f"{info['terminal_r']:+.1f}, "
+                           f"survived {info['survived_s']:.1f}s")
+            if curriculum.update_for_episode(info.get("episode", 0)):
+                from . import config as _c
+                live.log_event(f"curriculum: buddy promoted to "
+                               f"{_c.SKILL_LEVELS[curriculum.level]} "
+                               f"(skill {curriculum.level})")
+        if listener is not None:
+            listener(event, info)
+
     learner = LiveLearner(qtable_path, epsilon_override=epsilon,
-                          listener=listener)
+                          listener=_tap)
     print(f"[nemesis] qtable {'loaded' if learner.loaded else 'NEW'} "
           f"(episode {learner.q.episode}, eps={learner.q.epsilon():.3f}"
           f"{', CONTROL eps=' + str(epsilon) if epsilon is not None else ''})")
 
-    link = DirectorLink(port=port or config.DIRECTOR_PORT)
+    dash = None
+    if dashboard:
+        try:
+            dash, dash_url = start_dashboard(live=live)
+            print(f"[nemesis] dashboard live at {dash_url}")
+        except OSError as e:
+            print(f"[nemesis] dashboard unavailable: {e}")
+
     last_spawn_attempt = 0.0
     last_sent: Optional[tuple] = None
     polls = 0
@@ -228,6 +259,9 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
                 continue
             now = time.monotonic()
 
+            # Phase 9: absorb engine-side auto-lessons into the curriculum.
+            curriculum.reconcile(obs.get("nemesis", {}).get("buddy_skill"))
+
             obs_log.write(json.dumps({"t": round(time.time(), 3), "poll": polls,
                                       "obs": obs}, separators=(",", ":")) + "\n")
 
@@ -242,6 +276,7 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
                         reply = link.spawn(config.NEMESIS_SPAWN_ARG, 1,
                                            hud=learner.hud_spec())
                         last_spawn_attempt = now
+                        live.log_event("respawn requested — one nemesis stays alive")
                         sent_line = {"t": round(time.time(), 3), "poll": polls,
                                      "ep": learner.episode_label(), "order": f"spawn {config.NEMESIS_SPAWN_ARG}",
                                      "reply": reply}
@@ -257,6 +292,9 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
             if sent_line:
                 act_log.write(json.dumps(sent_line, separators=(",", ":")) + "\n")
 
+            # Phase 9: snapshot (~4 Hz) + history row (~1 Hz), throttled inside.
+            live.update(learner, obs, curriculum)
+
             elapsed = time.monotonic() - loop_t0
             time.sleep(max(0.0, config.POLL_PERIOD - elapsed))
 
@@ -264,6 +302,8 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
         pass
     finally:
         link.close()
+        if dash is not None:
+            dash.shutdown()
         obs_log.close()
         act_log.close()
         learner.q.save()
@@ -288,9 +328,12 @@ def main() -> int:
                     help="override epsilon (A/B control: 1.0 = random policy)")
     ap.add_argument("--fresh", action="store_true", help="wipe the qtable first")
     ap.add_argument("--max-seconds", type=float, default=None)
+    ap.add_argument("--no-dashboard", action="store_true",
+                    help="skip the :8787 weight-evolution console")
     args = ap.parse_args()
     run(qtable_path=args.qtable, epsilon=args.epsilon, fresh=args.fresh,
-        max_seconds=args.max_seconds, listener=_default_listener)
+        max_seconds=args.max_seconds, listener=_default_listener,
+        dashboard=not args.no_dashboard)
     return 0
 
 

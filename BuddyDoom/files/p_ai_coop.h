@@ -48,6 +48,11 @@ boolean P_Buddy_UsesMonsterAttack (player_t* p);	// buddy fights with a BUDDYDEF
 // fights the human, and player-vs-player damage bypasses -nofriendlyfire).
 int  P_AICoop_HostileMode (void);
 
+// Phase 9 skill curriculum: set (clamped 0..4) / read the hostile buddy's
+// skill level.  SetSkill returns the clamped level, or -1 when not hostile.
+int  P_AICoop_SetSkill (int level);
+int  P_AICoop_Skill (void);
+
 // Current buddy state as a small enum (0=follow, 1=fight, 2=heal, 3=hold,
 // 4=come, 5=grab).  Exposed for the console / voice system.
 int  P_AICoop_State (void);

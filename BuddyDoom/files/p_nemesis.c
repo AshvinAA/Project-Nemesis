@@ -87,6 +87,8 @@ typedef struct
 } nemrow_t;
 
 static nemrow_t	nem_rows[NEM_TYPES];
+static int	nem_buddy_skill;	// Phase 9: hostile-buddy curriculum level 0..4
+				// (0 = clueless; persisted with the table)
 static int	nem_initialized;
 
 // Ground-truth event ring. Labels are unique (index embedded) so the bridge
@@ -159,6 +161,38 @@ void NEM_NoteDamageM (const char* type, mobj_t* source, int damage, int weapon_i
     }
 }
 
+// Phase 9 auto-lessons: the buddy learns even without the trainer connected.
+// Every time the PLAYER kills the hostile buddy it takes a step up (it died
+// doing something wrong); every time the BUDDY KILLS the player a step down
+// (the human is already struggling).  The Python trainer's `buddy skill=N`
+// overrides these — they only move the level when they fire.
+static void NEM_BuddyLesson (int delta)
+{
+    int ns = nem_buddy_skill + delta;
+    if (ns < 0) ns = 0;
+    if (ns > 4) ns = 4;
+    if (ns != nem_buddy_skill)
+    {
+	nem_buddy_skill = ns;
+	printf ("NEM: hostile buddy %s to skill %d%s\n",
+		delta > 0 ? "promoted" : "demoted", ns,
+		nem_buddy_skill == 4 ? " (veteran)" : nem_buddy_skill == 0 ? " (clueless)" : "");
+    }
+}
+
+// Skill-up on the player killing the shotgun-guy row (from NEM_NoteKill).
+static void NEM_BuddyDeathLesson (const char* type)
+{
+    if (!strcmp (type, "shotgunguy")) NEM_BuddyLesson (+1);
+}
+
+// Public auto-lesson hook (p_inter.c, kill block): the hostile buddy killed
+// the human -- the human is struggling, ease off one step.
+void NEM_NoteBuddyKillPlayer (void)
+{
+    NEM_BuddyLesson (-1);
+}
+
 void NEM_NoteKill (const char* type, mobj_t* source, int weapon_idx)
 {
     int ti, wi;
@@ -175,6 +209,10 @@ void NEM_NoteKill (const char* type, mobj_t* source, int weapon_idx)
 		  nem_event_seq++, nem_type_names[ti], nem_weapon_names[wi]);
 	NEM_PushEvent (label);
     }
+    // Phase 9 auto-lesson: the player just killed the hostile buddy — it earns
+    // a skill step (it died doing something wrong).  Killed by anything else,
+    // or when the trainer is steering, this is neutral.
+    NEM_BuddyDeathLesson (type);
     (void)source;
 }
 
@@ -256,6 +294,22 @@ void NEM_NoteKillM (mobj_t* target, mobj_t* source, int weapon_idx)
 // Serialization into the observe stream (called from AI_Serialize)
 // ---------------------------------------------------------------------------
 
+// Phase 9: hostile-buddy curriculum level (0..4).  Lives in the nemesis store
+// so it persists in nemesis_memory.dat and rides every observe snapshot.
+int NEM_BuddySkill (void)
+{
+    if (!nem_initialized) NEM_Init ();
+    return nem_buddy_skill;
+}
+
+void NEM_SetBuddySkill (int level)
+{
+    if (!nem_initialized) NEM_Init ();
+    if (level < 0) level = 0;
+    if (level > 4) level = 4;
+    nem_buddy_skill = level;
+}
+
 int NEM_Serialize (char* buf, int buflen)
 {
     int n = 0, i, w, o;
@@ -307,7 +361,7 @@ int NEM_Serialize (char* buf, int buflen)
 	n += snprintf (buf + n, buflen - n, "}}");
 	if (n > buflen - 256) break;
     }
-    n += snprintf (buf + n, buflen - n, "],\"events\":[");
+    n += snprintf (buf + n, buflen - n, "],\"buddy_skill\":%d,\"events\":[", nem_buddy_skill);
 
     {
 	int e, first = 1;
@@ -438,8 +492,7 @@ void NEM_Load (void)
     if (!nem_initialized) NEM_Init ();
     snprintf (path, sizeof(path), "%snemesis_memory.dat", NEM_DirPrefix ());
     f = fopen (path, "rb");
-    if (!f) return;					// fresh install: neutral table
-    if (fread (&ver, sizeof(ver), 1, f) == 1 && ver == NEM_VERSION)
+    if (!f) return;					// fresh install: neutral table	if (fread (&ver, sizeof(ver), 1, f) == 1 && ver == NEM_VERSION)
     {
 	for (i = 0; i < NEM_TYPES; i++)
 	{
@@ -449,6 +502,12 @@ void NEM_Load (void)
 	    if (fread (&r->deaths, sizeof(int), 1, f) != 1) break;
 	    if (fread (r->deaths_by_weapon, sizeof(int), NEM_WEAPONS, f) != NEM_WEAPONS) break;
 	}
+	// Phase 9: the curriculum level rides at the tail.  Files written before
+	// it existed simply fail this read and keep the clueless default.
+	if (fread (&nem_buddy_skill, sizeof(int), 1, f) != 1)
+	    nem_buddy_skill = 0;
+	if (nem_buddy_skill < 0 || nem_buddy_skill > 4)
+	    nem_buddy_skill = 0;
     }
     fclose (f);
 }
@@ -471,6 +530,7 @@ void NEM_Save (void)
 	fwrite (&r->deaths, sizeof(int), 1, f);
 	fwrite (r->deaths_by_weapon, sizeof(int), NEM_WEAPONS, f);
     }
+    fwrite (&nem_buddy_skill, sizeof(int), 1, f);	// Phase 9: curriculum level
     fclose (f);
 }
 

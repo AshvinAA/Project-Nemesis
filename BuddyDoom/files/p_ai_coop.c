@@ -46,6 +46,7 @@
 #include "c_console.h"		// C_Printf -- the "navdbg" pathfinding dump
 #include "p_buddydef.h"		// buddystats_t / P_Buddy_GetStats -- apply the selected buddy's body
 #include "sounds.h"		// sfx_bd_* -- buddy see/pain/death/active slots
+#include "p_nemesis.h"		// Phase 9: skill curriculum store (persisted + observed)
 #include "s_sound.h"		// S_StartSound for the buddy's own voice
 
 // Buddy player-colour (v_png.c / r_things.c / m_menu.c)
@@ -83,6 +84,20 @@ static int	hostile_respawn;	// tics left before the killed buddy respawns
 static int	hostile_was_dead;	// latch: armed once per death, cleared when it stands up
 
 #define HOSTILE_RESPAWN_TICS	(5*TICRATE)	// bot death -> back at its spawn in 5 s
+
+// ---- Phase 9: skill curriculum (0 = clueless .. 4 = veteran) ---------------
+// The Python trainer OWNS the level (completed episodes -> promotions) and
+// pushes it over the director protocol (`buddy skill=N`).  The engine only
+// clamps and APPLIES it to behavior: reaction time, turn rate, vertical-aim
+// jitter, trigger discipline and stand-off distance.  No stat buffs: health,
+// armor, ammo and weapon damage stay vanilla -- a clueless buddy just misses.
+static int	buddy_skill;		// MIRROR of NEM_BuddySkill() (the store is authoritative;
+				// re-synced on level start and on every skill change)
+
+static const int skill_react[5] = { 52, 35, 20, 10, 4 };	// tics before the first shot
+static const int skill_turn[5]  = { 400, 900, 1300, 1300, 1300 };	// max angleturn/tic
+static const int skill_trig[5]  = { 1, 3, 6, 8, 9 };	// fire tics out of every 9
+static const int skill_stand[5] = { 448, 384, 320, 256, 192 };	// keep-away distance (u)
 
 // Hostile mode helper (defined later, after AICoop_NearestHuman which it calls):
 // the buddy's opponent is the nearest live human (SP: the player); NULL while
@@ -238,6 +253,9 @@ void P_AICoop_Init (void)
     if (M_CheckParm ("-buddyhostile"))
     {
 	buddy_hostile = 1;
+	buddy_skill = NEM_BuddySkill ();	// Phase 9: resume the persisted curriculum
+	printf ("P_AICoop: hostile-buddy skill resumes at %d (0=clueless .. 4=veteran)\n",
+		buddy_skill);
 	printf ("P_AICoop: HOSTILE BUDDY MODE -- the buddy fights you.  "
 		"It respawns %d s after it dies (no revive needed).\n",
 		HOSTILE_RESPAWN_TICS / TICRATE);
@@ -285,6 +303,7 @@ void P_AICoop_ResetSlot (void)
     crumb_link_tic = -1;		// ...and its link table (rebuilt on first use)
     hostile_respawn = 0;		// Phase 8: fresh respawn timer per level
     hostile_was_dead = 0;		// Phase 8: ...and its once-per-death latch
+    buddy_skill = NEM_BuddySkill ();	// Phase 9: re-sync the curriculum mirror
     best_pld = 0x7fffffff; noprog = 0;	// ...and the progress watchdog's running minimum
     vtrace_head = 0; vtrace_n = 0;	// ...and the position trace ring
     void_was_outside = false;		// ...and the "in solid space" edge detector
@@ -619,6 +638,33 @@ int P_AICoop_Active (void)
 int P_AICoop_HostileMode (void)
 {
     return buddy_hostile;
+}
+
+// Phase 9 curriculum: set the hostile buddy's skill level (0..4).  Called from
+// the director protocol (`buddy skill=N`); the Python trainer promotes the
+// buddy as episodes complete.  Returns the clamped level, or -1 when the
+// buddy isn't in hostile mode (the curriculum is meaningless for an ally).
+int P_AICoop_SetSkill (int level)
+{
+    if (!buddy_hostile) return -1;
+    if (level < 0) level = 0;
+    if (level > 4) level = 4;
+    if (level != buddy_skill)
+    {
+	buddy_skill = level;
+	NEM_SetBuddySkill (level);	// the store is authoritative (persisted + observed)
+	react_timer = 0;		// re-engage immediately at the new level
+	printf ("P_AICoop: buddy skill -> %d (%s)\n", level,
+		level == 0 ? "clueless" : level == 1 ? "recruit"
+		: level == 2 ? "competent" : level == 3 ? "sharp" : "veteran");
+    }
+    return buddy_skill;
+}
+
+// Current curriculum level (0..4), or -1 when not hostile.
+int P_AICoop_Skill (void)
+{
+    return buddy_hostile ? buddy_skill : -1;
 }
 
 // Public read-only accessor for coop_state (used by c_console.c for the voice
@@ -4285,7 +4331,9 @@ void P_AICoop_BuildCmd (void)
 	if (tgt)			// tgt == the human when it has line of sight
 	{
 	    coop_state = 1; haveaim = 1; fire = 1; aimmon = tgt;
-	    movethresh = COOP_KEEP;		// advance, but not point-blank
+	    // Phase 9 curriculum: a clueless buddy hangs way back (shotgun pellets
+	    // barely reach), a veteran presses in.  Pure positioning -- no buffs.
+	    movethresh = skill_stand[buddy_skill]*FRACUNIT;
 	    tx = tgt->x; ty = tgt->y;
 	    avoiddamage = 1;		// don't chase us into nukage/lava
 	}
@@ -4545,8 +4593,13 @@ void P_AICoop_BuildCmd (void)
     delta = want - mo->angle;
     rem   = (short)(delta >> 16);		// shortest signed turn (BAM>>16)
     turn  = rem;
-    if (turn >  COOP_TURN) turn =  COOP_TURN;
-    if (turn < -COOP_TURN) turn = -COOP_TURN;
+    {
+	// Phase 9: the curriculum also throttles turn rate (a clueless buddy
+	// swings around like a tank; veteran is as fast as the friendly bot).
+	int turn_max = buddy_hostile ? skill_turn[buddy_skill] : COOP_TURN;
+	if (turn >  turn_max) turn =  turn_max;
+	if (turn < -turn_max) turn = -turn_max;
+    }
     cmd->angleturn = (short)turn;
 
     dist = P_AproxDistance (tx - mo->x, ty - mo->y);
@@ -4578,7 +4631,13 @@ void P_AICoop_BuildCmd (void)
 
 	// Reaction time (-buddyreact): wait a beat after sighting a *fresh* target before
 	// opening fire, so the buddy isn't frame-perfect (0 = instant, the old behaviour).
-	if (aimmon != react_last) { react_timer = buddy_react; react_last = aimmon; }
+	if (aimmon != react_last)
+	{
+	    // Phase 9: hostile mode derives reaction time from the skill curriculum;
+	    // the -buddyreact CLI knob stays authoritative for the friendly buddy.
+	    react_timer = buddy_hostile ? skill_react[buddy_skill] : buddy_react;
+	    react_last = aimmon;
+	}
 	if (react_timer > 0) react_timer--;
 
 	// Aim vertically at the target's centre: if autoaim misses (target above or
@@ -4588,6 +4647,16 @@ void P_AICoop_BuildCmd (void)
 	fixed_t	hd = P_AproxDistance (aimmon->x - mo->x, aimmon->y - mo->y);
 	int	ld = hd ? (int)((FixedDiv (dz, hd) * 160) >> FRACBITS) : 0;
 	bot->lookdir = ld > COOP_LOOKMAX ? COOP_LOOKMAX : (ld < -COOP_LOOKMAX ? -COOP_LOOKMAX : ld);
+
+	// Phase 9 curriculum: low-skill buddies misjudge the vertical aim (jitter
+	// shrinks to zero at veteran).  Aim quality only -- damage stays vanilla.
+	if (buddy_hostile && buddy_skill < 4)
+	{
+	    int err = (4 - buddy_skill) * 6;	// +-24 at clueless .. +-6 at recruit
+	    ld += (((gametic * 7) >> 3) % (2*err + 1)) - err;
+	    bot->lookdir = ld > COOP_LOOKMAX ? COOP_LOOKMAX
+			   : (ld < -COOP_LOOKMAX ? -COOP_LOOKMAX : ld);
+	}
 
 	// Clear shot?  Autoaim-probe along the bearing: linetarget==NULL means the line
 	// is blocked (e.g. the crate the monster stands on) or too steep to reach.  Then
@@ -4619,7 +4688,12 @@ void P_AICoop_BuildCmd (void)
 		    // (its claws / fireball) instead of the player weapon; -1 = plain buddy -> weapon.
 		    int bd = P_Buddy_DoAttack (mo, aimmon);
 		    if (bd < 0)
-			cmd->buttons |= BT_ATTACK;
+		    {
+			// Phase 9 curriculum: flinchy trigger finger at low skill -- fires
+			// only skill_trig of every 9 tics once aimed (veteran: every tic).
+			if (!buddy_hostile || (gametic % 9) < skill_trig[buddy_skill])
+			    cmd->buttons |= BT_ATTACK;
+		    }
 		    if ((gametic & 255) == 0) AICoop_Callout ("taunt:", 4);	// occasional swagger
 		}
 	    }

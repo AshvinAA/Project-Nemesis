@@ -1253,7 +1253,14 @@ P_DamageMobj
 	P_AICoop_NoteKill (target, source);	// buddy kill-quip / spree / "nice" callout
 	P_Director_NoteKill (target, source);	// L4D stress: close-quarters kill credit
 	if (target->player && !P_AICoop_IsBuddy (target->player))
+	{
 	    P_Director_Say ("dir:death", 3, 1);	// (voice) the director taunts a survivor's death
+	    // Phase 9 auto-lesson: the human just died to the hostile buddy --
+	    // the curriculum eases off one step (unless the trainer is steering,
+	    // in which case its next `buddy skill=` simply overrides this).
+	    extern void NEM_NoteBuddyKillPlayer (void);		// p_nemesis.c
+	    NEM_NoteBuddyKillPlayer ();
+	}
 	P_KillMobj (source, target);
 	// Downed buddy: it must end up as a readable, revivable body on the ground (gray
 	// via its player colour translation) and must never gib -- but it should still DIE

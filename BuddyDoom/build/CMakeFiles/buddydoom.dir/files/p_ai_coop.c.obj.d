@@ -70,5 +70,6 @@ CMakeFiles/buddydoom.dir/files/p_ai_coop.c.obj: \
  F:\Project-Nemesis\BuddyDoom\files\p_buddydef.h \
  F:\Project-Nemesis\BuddyDoom\files\sounds.h \
  F:\Project-Nemesis\BuddyDoom\files\strife_sfx.inc \
+ F:\Project-Nemesis\BuddyDoom\files\p_nemesis.h \
  F:\Project-Nemesis\BuddyDoom\files\s_sound.h \
  F:\Project-Nemesis\BuddyDoom\files\i_voice.h

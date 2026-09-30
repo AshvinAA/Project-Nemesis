@@ -29,3 +29,15 @@ EPSILON_START = 0.2
 EPSILON_FLOOR = 0.05
 EPSILON_DECAY_EPISODES = 30
 QTABLE_PATH = "nemesis/rl/qtable.json"
+
+# --- Phase 9: hostile-buddy skill curriculum -------------------------------
+SKILL_LEVELS = ("clueless", "recruit", "competent", "sharp", "veteran")
+SKILL_MAX = 4
+SKILL_EPISODES_PER_LEVEL = 5   # trainer policy: +1 level per N completed episodes
+
+# --- Phase 9: dashboard ----------------------------------------------------
+LIVE_STATE_PATH = "nemesis/live_state.json"        # rewritten ~4 Hz for the UI
+STATE_HISTORY_PATH = "nemesis/log/state_history.jsonl"  # appended ~1 Hz (sparklines)
+DASHBOARD_PORT = 8787
+STATE_WRITE_EVERY = 0.25       # seconds between live_state.json rewrites
+HISTORY_APPEND_EVERY = 1.0     # seconds between history appends

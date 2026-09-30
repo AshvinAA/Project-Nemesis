@@ -647,7 +647,8 @@ static int AI_Serialize (void)
 
     // JEV nemesis: the learned weight table + ground-truth event ring ride along
     // in every observation (~100-200 tokens).  The bridge's learning loop and the
-    // rule director both consume them.
+    // rule director both consume them.  Phase 9: NEM_Serialize also emits the
+    // hostile-buddy curriculum level as nemesis.buddy_skill.
     if (n < OBSBUF && n < OBSBUF - 2048)
     {
 	if (n < OBSBUF) n += snprintf (obsbuf+n, OBSBUF-n, ",");
@@ -876,12 +877,16 @@ static void AI_HandleLine (char* line, int client)
 	{
 	    char* eq = strchr(kv, '=');
 	    if (!eq) continue;
-	    *eq++ = 0;
-	    if      (!strcmp(kv,"order")) { strncpy(order_s,eq,sizeof(order_s)-1); order_s[sizeof(order_s)-1]=0; }
+	    *eq++ = 0;	if      (!strcmp(kv,"order")) { strncpy(order_s,eq,sizeof(order_s)-1); order_s[sizeof(order_s)-1]=0; }
 	    else if (!strcmp(kv,"focus")) focus   = atoi(eq);
 	    else if (!strcmp(kv,"x"))     bx      = atoi(eq)*FRACUNIT;
 	    else if (!strcmp(kv,"y"))     by      = atoi(eq)*FRACUNIT;
 	    else if (!strcmp(kv,"for"))   fortics = atoi(eq);
+	    // Phase 9 skill curriculum: `buddy skill=N` promotes/demotes the hostile
+	    // buddy.  No-op (-1) when the buddy isn't hostile -- the curriculum only
+	    // exists for the training opponent.  P_AICoop_SetSkill routes into the
+	    // nemesis store (persisted + observed) and re-syncs the local mirror.
+	    else if (!strcmp(kv,"skill")) P_AICoop_SetSkill (atoi(eq));
 	}
 	P_AICoop_SetDirective (AI_BuddyTactic(order_s), P_AI_MobjForId(focus), bx, by, fortics);
 	if (client >= 0) (void)!write (client, "ok\n", 3);
