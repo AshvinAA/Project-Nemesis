@@ -6,7 +6,9 @@
 > untested, what broke and why, and what to do next. Everything below was
 > learned by doing — much of it the hard way.
 
-**Last updated:** 2026-09-19 (session 1: full build + engine compile + live smoke test)
+**Last updated:** 2026-09-30 (sessions 2–3: standalone Python RL agent `nemesis/` — see
+`docs/NEMESIS_RL_PLAN.md` for the living tracker — plus Phase 8 hostile-buddy mode, §3.5.
+Session 1 content below is unchanged and still accurate.)
 
 ---
 
@@ -213,6 +215,39 @@ nemesis:  {"version":1,"rows":[],"events":[]}    ← our block, live
 - `docs/JEV_DIRECTOR_WORKFLOW.md` v1.2 — full design + build record (§10 is final arch).
 - `jev/README.md` — runtime guide. Root `readme.md` — overview + quick start.
 
+### 3.5 Phase 8 — hostile-buddy training opponent (2026-09-30, source DONE, NOT yet compiled)
+
+New engine mode that turns the co-op buddy marine (player 2, enabled by default on a plain
+single-player launch) into a hostile training opponent: it hunts the human, and when killed
+it auto-respawns after 5 s instead of lying downed waiting for an L4D-style revive.
+Movement/aim AI is reused unchanged — only WHO it targets, WHAT damage is legal, and WHAT
+happens on death differ. No stat buffs (health/armor/ammo untouched).
+
+- **Flag:** `-buddyhostile` (parsed at the end of `P_AICoop_Init` in p_ai_coop.c).
+- **Targeting:** `AICoop_FindTarget` short-circuits in hostile mode — returns the nearest
+  live human (new `AICoop_HostileTarget`, LOS-gated via `P_CheckSight`); with no LOS it
+  returns NULL and the hunt branch in `P_AICoop_BuildCmd` walks it toward the human (96u
+  press) until the sight line reopens.
+- **Damage:** the `-nofriendlyfire` gate in `P_DamageMobj` (p_inter.c) now has
+  `&& !P_AICoop_HostileMode()` — human↔buddy damage is the point of the mode. Audited the
+  other damage gates; none block player→player: `ff_protect` defaults 0, `P_SpawnPlayer`
+  sets no MF_FRIEND on player mobjs, the turret/friendly source gate needs MF_FRIEND on the
+  shooter, the retaliation guard only stops MF_FRIEND *targets*, and the aim-line FF guard
+  in BuildCmd is skipped in hostile mode (else it would strafe forever and never fire).
+- **Respawn:** in the `PST_DEAD` branch of `P_AICoop_BuildCmd`, a once-per-death latch arms
+  `HOSTILE_RESPAWN_TICS` (5 s), then teleports the corpse to the recorded spawn point
+  (`coop_home_*`) and calls `P_AICoop_Revive(AICoop_FullHealth())` — the engine's own
+  stand-up path. Deliberately NOT `PST_REBORN`: in single player `G_DoReborn` reloads the
+  whole level. Latch is cleared in the LIVE path and per level in `P_AICoop_ResetSlot`.
+- **C files touched:** `p_ai_coop.c` (statics + flag + targeting + hunt branch + respawn),
+  `p_ai_coop.h` (`P_AICoop_HostileMode()`), `p_inter.c` (ff gate).
+- **Status:** brace/paren-balance checked only — this machine had no C toolchain at edit
+  time. These changes ride the SAME one-shot rebuild as the other pending source changes:
+  the §6.4 listener re-accept fix, `NEM_EVENTMAX` 16→64 (p_nemesis.c), and the HUD
+  `NEM_HUDSet/NEM_HUDPrint` + `hud=` protocol token. After rebuilding, verify with the
+  `-buddyhostile` launch line in §8 (console must print "HOSTILE BUDDY MODE").
+- Full design + checklist: `docs/NEMESIS_RL_PLAN.md` §8.
+
 ---
 
 ## 4. Verified protocol facts (pin these; they cost blood to learn)
@@ -350,9 +385,10 @@ nemesis:  {"version":1,"rows":[],"events":[]}    ← our block, live
   the listener keeps the FIRST socket half-open and never re-accepts after an abrupt
   client disconnect. **The bridge's GameLink does clean reconnects, but if you
   experiment with raw probes, close them properly (`s.end()`), and prefer just
-  running the bridge.** Candidate upstream fix: accept-loop that re-accepts on
-  disconnect (see `AI_PollSocket`/`P_AI_NetService` in p_ai_llm.c). NOT yet fixed —
-  it's the known-open runtime issue.
+  running the bridge.** UPDATE 2026-09-30: the fix is now WRITTEN in `AI_PollSocket`
+  (p_ai_llm.c) — any non-WSAEWOULDBLOCK socket error closes the client and re-arms
+  `accept()` (POSIX mirror included); reproduced the wedge live first (ECONNREFUSED with
+  the process alive). Uncompiled — rides the pending rebuild (see §3.5).
 - **The bridge was never connected live.** Next session: kill stale processes
   (`taskkill //F //IM buddydoom.exe`), relaunch (PowerShell Start-Process), then
   `cd jev && npm run dev -- --mock` and watch `log/emitted.jsonl` + `log/calls.jsonl`.
@@ -405,6 +441,9 @@ CMAKE="/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/ID
 
 # Live game (PowerShell Start-Process; cmd start hangs!)
 powershell -Command "Start-Process -FilePath 'BuddyDoom\run\buddydoom.exe' -ArgumentList '-iwad','freedoom1.wad','-warp','1','1','-skill','3','-aidirector','31666' -WorkingDirectory 'BuddyDoom\run'"
+
+# Same + hostile training buddy (Phase 8 — needs a rebuild that includes it, see §3.5)
+powershell -Command "Start-Process -FilePath 'BuddyDoom\run\buddydoom.exe' -ArgumentList '-iwad','freedoom1.wad','-warp','1','1','-skill','3','-aidirector','31666','-buddyhostile' -WorkingDirectory 'BuddyDoom\run'"
 
 # Bridge against the live game (mock Jev)
 cd jev && npm run dev -- --mock

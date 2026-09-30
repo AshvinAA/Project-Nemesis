@@ -1,0 +1,34 @@
+Do not build the x86-ansi stubs and plugins
+
+NSIS unconditionally builds ANSI installer stubs and plugin variants
+alongside the Unicode ones whenever the target CPU is x86, with no
+option to disable them. ANSI installers are a legacy compatibility
+format w64devkit does not need: makensis defaults to Unicode on every
+target, and a script requesting "Target x86-ansi" fails cleanly with
+"adequate stub not found". Dropping them keeps the x86 kit and the
+multilib kit's secondary x86 stub set Unicode-only and identical in
+shape to the amd64 set.
+
+--- a/SConstruct
++++ b/SConstruct
+@@ -695,11 +695,6 @@
+ 	if defenv['UNICODE']:
+ 		BuildStub(stub, False, True)
+ 		BuildStub(stub, True, True)
+-	
+-	if GetArcCPU(defenv)=='x86':
+-		BuildStub(stub, False, False)
+-		BuildStub(stub, True, False)
+-	# BUGBUG64: Should build x86 stubs on x64?
+ 
+ defenv.DistributeStubs('Source/exehead/uninst.ico',names='uninst')
+ 
+@@ -782,8 +777,6 @@
+ 	srcpath = 'Contrib/' + plugin
+ 	build_dir = '$BUILD_PREFIX/' + plugin
+ 	pvariants = []
+-	if GetArcCPU(defenv) == 'x86':
+-		pvariants += [{'e':plugin_env.Clone()}]
+ 	if defenv['UNICODE']:
+ 		pvariants += [{'e':plugin_uenv.Clone()}]
+ 	for pvariant in pvariants:

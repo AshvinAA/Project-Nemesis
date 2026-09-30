@@ -1,0 +1,3 @@
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cmake.exe -E rm -f CMakeFiles\buddydoom.dir/objects.a
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\ar.exe qc CMakeFiles\buddydoom.dir/objects.a @CMakeFiles\buddydoom.dir\objects1.rsp
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cc.exe -O3 -DNDEBUG -Wl,--whole-archive CMakeFiles\buddydoom.dir/objects.a -Wl,--no-whole-archive -o buddydoom.exe -Wl,--out-implib,libbuddydoom.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\buddydoom.dir\linkLibs.rsp

@@ -921,7 +921,7 @@ static void AI_OpenSocket (void)
     listen_fd = socket (AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0)
 	{ printf ("P_AI: socket() failed\n"); ai_on = 0; return; }
-    setsockopt (listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    setsockopt (listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
 
     memset (&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;

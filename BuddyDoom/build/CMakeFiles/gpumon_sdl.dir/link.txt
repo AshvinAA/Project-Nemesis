@@ -1,0 +1,3 @@
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cmake.exe -E rm -f CMakeFiles\gpumon_sdl.dir/objects.a
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\ar.exe qc CMakeFiles\gpumon_sdl.dir/objects.a @CMakeFiles\gpumon_sdl.dir\objects1.rsp
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cc.exe -O3 -DNDEBUG -mwindows -Wl,--whole-archive CMakeFiles\gpumon_sdl.dir/objects.a -Wl,--no-whole-archive -o gpumon.exe -Wl,--out-implib,libgpumon.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\gpumon_sdl.dir\linkLibs.rsp

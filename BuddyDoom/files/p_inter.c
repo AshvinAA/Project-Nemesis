@@ -1121,7 +1121,10 @@ P_DamageMobj
     // -nofriendlyfire: the human player and the AI buddy can't hurt each other
     // (default off = vanilla co-op, where they can).  Bail before any thrust,
     // momentum reset, damage or retaliation, so it's as if the shot never hit.
+    // Phase 8 hostile-buddy mode: player-vs-player damage between the human and
+    // the buddy is the WHOLE POINT, so it bypasses ff_protect.
     if (ff_protect && source && source->player && target->player
+	&& !P_AICoop_HostileMode ()
 	&& (P_AICoop_IsBuddy (source->player) ^ P_AICoop_IsBuddy (target->player)))
 	return;
 

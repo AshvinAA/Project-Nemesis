@@ -1,0 +1,33 @@
+CMakeFiles/buddydoom.dir/files/heretic_deco.c.obj: \
+ F:\Project-Nemesis\BuddyDoom\files\heretic_deco.c \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/string.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/crtdefs.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/corecrt.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw_mac.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw_secapi.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/vadefs.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/sec_api/string_s.h \
+ F:\Project-Nemesis\BuddyDoom\files\doomdef.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/stdio.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/corecrt_stdio_config.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw_off_t.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/swprintf.inl \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/sec_api/stdio_s.h \
+ F:\Project-Nemesis\BuddyDoom\files\doomtype.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/lib/gcc/x86_64-w64-mingw32/16.2.0/include/stdbool.h \
+ F:\Project-Nemesis\BuddyDoom\files\info.h \
+ F:\Project-Nemesis\BuddyDoom\files\d_think.h \
+ F:\Project-Nemesis\BuddyDoom\files\strife_spr.inc \
+ F:\Project-Nemesis\BuddyDoom\files\strife_states.inc \
+ F:\Project-Nemesis\BuddyDoom\files\strife_mt.inc \
+ F:\Project-Nemesis\BuddyDoom\files\m_random.h \
+ F:\Project-Nemesis\BuddyDoom\files\m_fixed.h \
+ F:\Project-Nemesis\BuddyDoom\files\tables.h \
+ F:\Project-Nemesis\BuddyDoom\files\sounds.h \
+ F:\Project-Nemesis\BuddyDoom\files\strife_sfx.inc \
+ F:\Project-Nemesis\BuddyDoom\files\w_wad.h \
+ F:\Project-Nemesis\BuddyDoom\files\p_mobj.h \
+ F:\Project-Nemesis\BuddyDoom\files\doomdata.h \
+ F:\Project-Nemesis\BuddyDoom\files\r_defs.h \
+ F:\Project-Nemesis\BuddyDoom\files\heretic.h

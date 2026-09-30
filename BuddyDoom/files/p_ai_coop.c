@@ -73,6 +73,21 @@ static fixed_t	ai_gx, ai_gy;		// LLM goto destination
 static int	react_timer;		// tics left before firing a freshly-sighted target
 static mobj_t*	react_last;		// the target the reaction timer is counting for
 
+// ---- Phase 8: hostile-buddy mode (-buddyhostile) ---------------------------
+// Turns the co-op buddy into a training opponent: it hunts the human instead of
+// fighting beside them, and when killed it respawns after a short delay instead
+// of lying downed until revived.  Movement/aim AI is unchanged -- only WHO it
+// targets, WHO it may damage and WHAT happens on death differ.
+static int	buddy_hostile;		// -buddyhostile: the buddy fights the human
+static int	hostile_respawn;	// tics left before the killed buddy respawns
+static int	hostile_was_dead;	// latch: armed once per death, cleared when it stands up
+
+#define HOSTILE_RESPAWN_TICS	(5*TICRATE)	// bot death -> back at its spawn in 5 s
+
+// Hostile mode helper (defined later, after AICoop_NearestHuman which it calls):
+// the buddy's opponent is the nearest live human (SP: the player); NULL while
+// no live human exists -> it stands down.
+
 #define COOP_BLAST_SAFE	(176*FRACUNIT)	// don't fire rocket/BFG at a target closer than this (splash)
 #define COOP_BARREL_SAFE (141*FRACUNIT)	// barrel blast (A_Explode radius 128) + 10%, rounded up = ceil(128*1.1)
 #define COOP_DODGE_RANGE (256*FRACUNIT)	// react to incoming missiles within this range
@@ -216,6 +231,17 @@ void P_AICoop_Init (void)
 		"connect the director to drive its tactics.\n");
     else
 	printf ("P_AICoop: rule-based co-op companion enabled (player 2)\n");
+
+    // Phase 8: -buddyhostile turns the buddy into a hostile training opponent.
+    // Works with the rule-based buddy (default-on SP buddy or -coop) and the
+    // -aicoop layer.  Needs a Player_2_Start on the map (same as normal co-op).
+    if (M_CheckParm ("-buddyhostile"))
+    {
+	buddy_hostile = 1;
+	printf ("P_AICoop: HOSTILE BUDDY MODE -- the buddy fights you.  "
+		"It respawns %d s after it dies (no revive needed).\n",
+		HOSTILE_RESPAWN_TICS / TICRATE);
+    }
 }
 
 // Called from P_SetupLevel after P_LoadThings.  If -coop/-aicoop was given
@@ -257,6 +283,8 @@ void P_AICoop_ResetSlot (void)
 
     crumb_n = 0; trail_active = 0;	// drop the previous map's breadcrumb trail
     crumb_link_tic = -1;		// ...and its link table (rebuilt on first use)
+    hostile_respawn = 0;		// Phase 8: fresh respawn timer per level
+    hostile_was_dead = 0;		// Phase 8: ...and its once-per-death latch
     best_pld = 0x7fffffff; noprog = 0;	// ...and the progress watchdog's running minimum
     vtrace_head = 0; vtrace_n = 0;	// ...and the position trace ring
     void_was_outside = false;		// ...and the "in solid space" edge detector
@@ -586,6 +614,13 @@ int P_AICoop_Active (void)
     return companion_active;
 }
 
+// Phase 8: -buddyhostile mode accessor (see p_ai_coop.h).  Used by p_inter.c
+// to let human<->buddy damage through the -nofriendlyfire gate.
+int P_AICoop_HostileMode (void)
+{
+    return buddy_hostile;
+}
+
 // Public read-only accessor for coop_state (used by c_console.c for the voice
 // tag mapping).  Returns -1 if the buddy is inactive.
 int P_AICoop_State (void)
@@ -620,6 +655,13 @@ static mobj_t* AICoop_NearestHuman (fixed_t x, fixed_t y)
 	if (!best || d < bestd) { best = m; bestd = d; }
     }
     return best;
+}
+
+// Phase 8 hostile-buddy mode: the buddy's opponent is the nearest live human
+// (single-player: the player).  NULL while no live human exists -> stand down.
+static mobj_t* AICoop_HostileTarget (mobj_t* self)
+{
+    return buddy_hostile ? AICoop_NearestHuman (self->x, self->y) : NULL;
 }
 
 
@@ -854,6 +896,16 @@ static mobj_t* AICoop_FindTarget (mobj_t* self)
     thinker_t*	th;
     mobj_t*	best = NULL;
     fixed_t	bestd = 0;
+
+    // Phase 8 hostile-buddy mode: the training opponent is the HUMAN.  None of
+    // the monster filters below apply to a player, so return them directly.
+    // LOS-gated so it doesn't spray through walls; with no LOS the normal
+    // follow logic walks it toward the human until the sight line reopens.
+    if (buddy_hostile)
+    {
+	mobj_t* ht = AICoop_HostileTarget (self);
+	return (ht && P_CheckSight (self, ht)) ? ht : NULL;
+    }
 
     for (th = thinkercap.next; th != &thinkercap; th = th->next)
     {
@@ -2777,7 +2829,9 @@ void P_AICoop_NoteDamage (mobj_t* victim, mobj_t* source, int damage)
 	}
     }
     // Friendly fire: the human shot the buddy -> Duke-style protest.
-    if (P_AICoop_IsBuddy (victim->player) && source && source->player == &players[0])
+    // Phase 8: not in hostile mode -- the human shooting it is the whole idea.
+    if (!buddy_hostile
+	&& P_AICoop_IsBuddy (victim->player) && source && source->player == &players[0])
 	AICoop_Callout ("ff:", 6);
 }
 
@@ -3861,6 +3915,30 @@ void P_AICoop_BuildCmd (void)
     // for a few seconds, and it gets back up where it fell.
     if (bot->playerstate == PST_DEAD)
     {
+	// Phase 8 hostile-buddy mode: no L4D revive-wait -- the downed opponent
+	// respawns on a timer at its spawn point, ready to re-engage.
+	if (buddy_hostile)
+	{
+	    // Arm the respawn timer once per death (latch clears when it is
+	    // back on its feet -- both below and in the LIVE path, so a revival
+	    // through any other path can't leave a stale latch behind).
+	    if (!hostile_was_dead)
+	    {
+		hostile_was_dead = 1;
+		hostile_respawn = HOSTILE_RESPAWN_TICS;
+	    }
+	    if (hostile_respawn > 0)
+		hostile_respawn--;
+	    if (hostile_respawn == 0 && bot->mo && coop_home_set)
+	    {
+		P_TeleportMove (bot->mo, coop_home_x, coop_home_y);
+		bot->mo->momx = bot->mo->momy = bot->mo->momz = 0;
+		P_AICoop_Revive (AICoop_FullHealth ());	// back on its feet at home, at full HP
+		hostile_was_dead = 0;			// (Revive() already callouts "revived:")
+	    }
+	    memset (cmd, 0, sizeof(*cmd));
+	    return;
+	}
 	// If the downed body fell on (or slid into) a damaging floor -- nukage/lava/etc. --
 	// the human can't safely reach it to revive and it would just keep cooking until it
 	// dies for good.  So recall it to the recorded spawn point AND stand it straight back
@@ -3880,6 +3958,7 @@ void P_AICoop_BuildCmd (void)
 	return;
 
     mo = bot->mo;
+    hostile_was_dead = 0;	// Phase 8: standing -> the death latch is spent
     memset (cmd, 0, sizeof(*cmd));
 
     // Position trace (ring, ~2 s) -- recorded before anything can move or recall it.
@@ -4197,8 +4276,32 @@ void P_AICoop_BuildCmd (void)
 
     coop_state = 0;
 
-    // (attack) ordered: charge the forced target until it (or the timer) dies
-    if (forceaggro > 0)
+    // Phase 8 hostile-buddy mode: hunt the human instead of the rule-based
+    // priorities (follow / heal / grab).  Everything downstream -- turning,
+    // vertical aim, reaction delay, splash guard, damage watchdog -- runs
+    // unchanged with the human as `aimmon`.
+    if (buddy_hostile && mo)
+    {
+	if (tgt)			// tgt == the human when it has line of sight
+	{
+	    coop_state = 1; haveaim = 1; fire = 1; aimmon = tgt;
+	    movethresh = COOP_KEEP;		// advance, but not point-blank
+	    tx = tgt->x; ty = tgt->y;
+	    avoiddamage = 1;		// don't chase us into nukage/lava
+	}
+	else if (pl)			// no sight line -> close in until there is one
+	{
+	    // Press tight (96u): the goal is the human's LIVE position, so hunting
+	    // right up against it re-opens the sight line fastest around corners.
+	    coop_state = 4; haveaim = 1; movethresh = 96*FRACUNIT; navigate = 1;
+	    tx = pl->x; ty = pl->y;
+	}
+    }
+
+    // (attack) ordered: charge the forced target until it (or the timer) dies.
+    // Phase 8: hostile mode ignores director/console "attack a monster" orders
+    // -- its only opponent is the human.
+    if (forceaggro > 0 && !buddy_hostile)
     {
 	if (!forcetarget || forcetarget->health <= 0
 	    || (forcetarget->flags & MF_CORPSE) || !(forcetarget->flags & MF_SHOOTABLE))
@@ -4493,11 +4596,17 @@ void P_AICoop_BuildCmd (void)
 	{
 	    angle_t	aang = R_PointToAngle2 (mo->x, mo->y, aimmon->x, aimmon->y);
 	    P_AimLineAttack (mo, aang, COOP_SIGHT);
-	    if ((linetarget && linetarget->player) || AICoop_PlayerInLine (mo, aimmon))
+
+	    // Phase 8 hostile mode: any player on the aim line IS the intended
+	    // target, so the friendly-fire guard must not trigger at all -- else
+	    // the buddy strafes forever and never opens fire on the human.
+	    if (!buddy_hostile
+		&& ((linetarget && linetarget->player)
+		    || AICoop_PlayerInLine (mo, aimmon)))
 	    {
 		// Friendly fire guard: the autoaim trace hits a PLAYER (the human is
-		// between us and the monster) -- DON'T shoot.  Strafe a little to clear
-		// the angle so the next tic has a safe shot.
+		// between us and the monster) -- DON'T shoot.  Strafe a little to
+		// clear the angle so the next tic has a safe shot.
 		AICoop_AddSide (cmd, ((gametic / 16) & 1) ? COOP_RUN : -COOP_RUN);
 	    }
 	    else if (linetarget && abs(rem) < COOP_FACING && react_timer == 0 && !splash_close)

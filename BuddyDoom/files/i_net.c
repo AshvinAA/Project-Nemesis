@@ -185,7 +185,7 @@ void PacketSend (void)
     }
 		
     //printf ("sending %i\n",gametic);		
-    c = sendto (sendsocket , &sw, doomcom->datalength
+    c = sendto (sendsocket , (char *)&sw, doomcom->datalength
 		,0,(void *)&sendaddress[doomcom->remotenode]
 		,sizeof(sendaddress[doomcom->remotenode]));
 	
@@ -206,7 +206,7 @@ void PacketGet (void)
     doomdata_t		sw;
 				
     fromlen = sizeof(fromaddress);
-    c = recvfrom (insocket, &sw, sizeof(sw), 0
+    c = recvfrom (insocket, (char *)&sw, sizeof(sw), 0
 		  , (struct sockaddr *)&fromaddress, &fromlen );
     if (c == -1 )
     {

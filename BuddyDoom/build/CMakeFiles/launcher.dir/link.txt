@@ -1,0 +1,3 @@
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cmake.exe -E rm -f CMakeFiles\launcher.dir/objects.a
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\ar.exe qc CMakeFiles\launcher.dir/objects.a @CMakeFiles\launcher.dir\objects1.rsp
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cc.exe -O3 -DNDEBUG -mwindows -Wl,--whole-archive CMakeFiles\launcher.dir/objects.a -Wl,--no-whole-archive -o launcher.exe -Wl,--out-implib,liblauncher.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\launcher.dir\linkLibs.rsp

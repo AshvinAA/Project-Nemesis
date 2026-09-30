@@ -1,0 +1,6 @@
+disable-beep.patch
+disable-empty-complete.patch
+default-noiconify.patch
+system-profile.patch
+zstd.patch
+mkdtemp.patch

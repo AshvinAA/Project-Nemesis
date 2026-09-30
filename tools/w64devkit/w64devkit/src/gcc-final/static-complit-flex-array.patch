@@ -1,0 +1,61 @@
+c: Complete flexible array member initializers of compound literals
+
+A static (C23 storage-class specifier) or file-scope compound literal of
+a struct type whose flexible array member is initialized, e.g.
+
+  int g (void)
+  { return __builtin_strlen ((static struct { char i, d[]; }) { 0, 0 }.d); }
+
+was handled by build_compound_literal without the two steps that
+finish_decl performs for an ordinary variable with such an initializer:
+adding the size of the flexible array member's initializer to the
+DECL_SIZE of the object (add_flexible_array_elts_to_size), and giving
+the initializer's array type a domain (complete_flexible_array_elts).
+
+As a result the object was emitted with a DECL_SIZE that does not cover
+the initializer, so varasm produced a negative amount of trailing
+padding ('.space 18446744073709551609' / '.zero -7'), which the
+assembler rejects; and component_ref_size, when asked for the size of
+the member by the waccess pass (at -O0) or the strlen pass (at -O2),
+found an initializer whose type has no TYPE_SIZE_UNIT and passed the
+null tree to tree_to_poly_int64, crashing with a segfault.
+
+Do both steps in build_compound_literal, and make component_ref_size
+return "unknown" instead of crashing if it ever sees such an initializer
+from another source.
+
+---
+--- a/gcc/c/c-decl.cc
++++ b/gcc/c/c-decl.cc
+@@ -6520,6 +6520,17 @@
+       DECL_USER_ALIGN (decl) = 1;
+     }
+   store_init_value (loc, decl, init, NULL_TREE);
++
++  /* As in finish_decl, if the initializer initializes a flexible array
++     member, add the size of its initializer to the size of the object
++     and give the initializer's array type a domain.  Otherwise the
++     object would be emitted with too small a size, and the middle end
++     (e.g. component_ref_size) would see an initializer whose type has
++     no size.  */
++  if (init && TREE_CODE (init) == CONSTRUCTOR)
++    add_flexible_array_elts_to_size (decl, init);
++  complete_flexible_array_elts (DECL_INITIAL (decl));
++
+   if (current_scope != file_scope
+       && TREE_STATIC (decl)
+       && !TREE_READONLY (decl)
+--- a/gcc/tree.cc
++++ b/gcc/tree.cc
+@@ -13613,6 +13613,11 @@
+ 	  if (init)
+ 	    {
+ 	      memsize = TYPE_SIZE_UNIT (TREE_TYPE (init));
++	      if (!memsize)
++		/* The initializer's array type has no size (its domain
++		   was never set).  The size of the member cannot be
++		   determined from it.  */
++		return NULL_TREE;
+ 	      if (tree refsize = TYPE_SIZE_UNIT (argtype))
+ 		{
+ 		  /* Use the larger of the initializer size and the tail

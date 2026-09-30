@@ -1,0 +1,31 @@
+CMakeFiles/buddydoom.dir/files/opl3.c.obj: \
+ F:\Project-Nemesis\BuddyDoom\files\opl3.c \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/stdio.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/corecrt_stdio_config.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/corecrt.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw_mac.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw_secapi.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/vadefs.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/_mingw_off_t.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/swprintf.inl \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/sec_api/stdio_s.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/stdlib.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/corecrt_wstdlib.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/lib/gcc/x86_64-w64-mingw32/16.2.0/include/limits.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/lib/gcc/x86_64-w64-mingw32/16.2.0/include/syslimits.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/limits.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/crtdefs.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/sec_api/stdlib_s.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/malloc.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/lib/gcc/x86_64-w64-mingw32/16.2.0/include/mm_malloc.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/errno.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/string.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/sec_api/string_s.h \
+ F:\Project-Nemesis\BuddyDoom\files\opl3.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/inttypes.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/lib/gcc/x86_64-w64-mingw32/16.2.0/include/stdint.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/stdint.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/lib/gcc/x86_64-w64-mingw32/16.2.0/include/stddef.h \
+ F:/Project-Nemesis/tools/w64devkit/w64devkit/include/stddef.h \
+ F:\Project-Nemesis\BuddyDoom\files\wf_rom.h

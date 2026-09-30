@@ -3,7 +3,7 @@
 > This is the working plan for the **Q-learning Shotgun Guy** ("Jev learns to fight").
 > It supersedes the original brief's clean-room design where the repo has already
 > solved the problem. **Progress log is at the bottom — append an entry after every
-> finished task.** Decision ledger in §10.
+> finished task.** Decision ledger in §11.
 
 **Status legend:** `[ ]` todo · `[~]` in progress · `[x]` DONE
 
@@ -90,17 +90,53 @@
 
 **Done =** ✅ orchestrator ready; the actual demo curve requires the rebuild + live sessions (human player in the loop).
 
-## 8. Phase 7 — Demo video **[ ]**
+## 8. Phase 8 — Hostile-buddy training opponent **[x]** (source; compile pending rebuild)
+
+Makes the co-op buddy marine fight the PLAYER as a training opponent, with auto-respawn
+on death. Movement/aim AI reused as-is — only *who* it targets, *what damage is legal*,
+and *what happens on death* change. No stat buffs (health/armor/ammo untouched).
+
+- [x] **8.1 Flag:** `-buddyhostile` parsed at the end of `P_AICoop_Init` (p_ai_coop.c);
+      statics `buddy_hostile`, `hostile_respawn`, `hostile_was_dead` + `P_AICoop_HostileMode()`
+      accessor (header + p_inter.c use). Plain SP launch already enables the buddy by default,
+      so `-buddyhostile` alone is enough.
+- [x] **8.2 Targeting:** `AICoop_FindTarget` short-circuits in hostile mode — returns the
+      nearest live human (via `AICoop_HostileTarget`, defined after `AICoop_NearestHuman`)
+      gated on `P_CheckSight`; NULL with no LOS (normal hunt logic closes the distance).
+- [x] **8.3 Hostile combat branch** (top of the priority chain in `P_AICoop_BuildCmd`):
+      LOS → state 1 fight (fire at the human, `movethresh=COOP_KEEP`, avoid damaging floors);
+      no LOS → press to 96u toward the live human position (re-opens the sight line fast).
+      Aim-line friendly-fire guard (`!buddy_hostile &&`) skipped so the fire branch is
+      reachable. Director/console "attack" orders ignored (`forceaggro` gate). No "ff:" protest
+      callout in `P_AICoop_NoteDamage` when hostile.
+- [x] **8.4 Damage enable (p_inter.c `P_DamageMobj`):** `-nofriendlyfire` gate now has
+      `&& !P_AICoop_HostileMode()` — human↔buddy damage is legal in hostile mode even under
+      ff_protect. Verified NOT obstacles: `ff_protect` defaults 0; `P_SpawnPlayer` sets no
+      MF_FRIEND on the buddy; the drone/turret MF_FRIEND source gate doesn't match player
+      shooters; retaliation guard (`target->flags & MF_FRIEND`) doesn't apply to players;
+      MT_XPOISONCLOUD is irrelevant (buddy fires hitscan/projectile player weapons).
+- [x] **8.5 Auto-respawn:** in the `PST_DEAD` branch of `P_AICoop_BuildCmd`, hostile mode
+      arms `HOSTILE_RESPAWN_TICS` (5 s) once per death (latch), then teleports the corpse to
+      the recorded spawn (`coop_home_*`, set at level start) and `P_AICoop_Revive(FullHealth())`
+      — reuses the engine's own stand-up path. Latch also cleared in the LIVE path and per
+      level in `P_AICoop_ResetSlot`. No PST_REBORN (avoids the SP level-reload). corpse
+      stays non-solid (no USE-reborn exploit); one dead marine on the intermission
+      screen is cosmetic.
+- [x] **8.6 Docs:** this section + progress log. **Blocked:** compile verification — no C
+      toolchain on this machine; changes ride the pending one-shot rebuild (§12) together
+      with the Phase 0.1 listener fix, NEM_EVENTMAX 64 and the HUD work.
+
+## 9. Phase 7 — Demo video **[ ]**
 
 - [ ] Reset-on-camera, narrate HUD (ep/ε/reward), fight at ep 1 vs ep ~25 vs random control.
 
-## 9. Out of scope / non-goals (re-confirmed)
+## 10. Out of scope / non-goals (re-confirmed)
 
 - No DNN, no stat buffs, no C-embedded learning, no overlay tool (HUD via `C_Printf`).
 - `jev/` bridge untouched and OFF during RL sessions (single-client listener).
 - Map pinned for training (geometry-dependent buckets); map id stored in qtable header.
 
-## 10. Decision ledger
+## 11. Decision ledger
 
 | # | Decision | Choice | Status |
 |---|---|---|---|
@@ -113,7 +149,7 @@
 | D7 | `nemesis propose` sync | Q-table-only v1; C-table sync optional later | OPEN (reco: Q-only) |
 | D8 | Crash dump relevance | Stale Sep 25 buddy-nav artifact — unrelated | RESOLVED |
 
-## 11. Run cheat sheet (from HANDOFF.md — verified)
+## 12. Run cheat sheet (from HANDOFF.md — verified)
 
 ```sh
 # Build engine (MSVC via VS BuildTools CMake)
@@ -123,6 +159,9 @@ CMAKE="/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/ID
 
 # Launch game (PowerShell! cmd start hangs the calling shell)
 powershell -Command "Start-Process -FilePath 'BuddyDoom\run\buddydoom.exe' -ArgumentList '-iwad','freedoom1.wad','-warp','1','1','-skill','3','-aidirector','31666' -WorkingDirectory 'BuddyDoom\run'"
+
+# Launch with the Phase 8 hostile training buddy (needs the Phase-8 rebuild first)
+powershell -Command "Start-Process -FilePath 'BuddyDoom\run\buddydoom.exe' -ArgumentList '-iwad','freedoom1.wad','-warp','1','1','-skill','3','-aidirector','31666','-buddyhostile' -WorkingDirectory 'BuddyDoom\run'"
 
 # Probe protocol (close properly or the listener wedges — pre-0.1)
 node -e "const net=require('net');const s=net.connect(31666,'127.0.0.1',()=>s.write('observe\n'));let b='';s.on('data',d=>{b+=d;if(b.includes('\n')){console.log(b.slice(0,300));s.end();process.exit(0)}});"
@@ -164,3 +203,14 @@ rm BuddyDoom/run/nemesis_memory.dat
 - **1.1–1.3 DONE** — `nemesis/` Python package scaffolded: `config.py`, `engine.py` (DirectorLink with clean half-close disconnects), `rl_agent.py` (10 Hz loop, obs+acts jsonl logging, single-nemesis spawn discipline, hardcoded chase policy with cadence + immediate id-change retarget, `for=35` short directives).
 - **1.4 DONE** — offline self-test `nemesis/test_selftest.py`: **PASS** (6 commands asserted across a scripted stream incl. abrupt disconnect + roster changes; 2 episodes; logs coherent). Test caught a real bug pre-live (id change waited for refresh cadence) — fixed by retargeting immediately on id change.
 - Note: `nemesis/log/` is runtime data; the self-test writes to a tempdir, live runs append to `nemesis/log/`.
+
+**2026-09-30 — Phase 8: hostile-buddy training opponent (source DONE; compile pending rebuild)**
+- User request: buddy should fight the player and auto-respawn when killed. Diagnosis first: the buddy IS enabled on a plain SP launch (default-on in `P_AICoop_Init`), it's just a hard ally by design — `Companion_IsEnemy` excludes players, `AICoop_FindTarget` scans monsters only, and death goes to the L4D revive-wait instead of respawning. Nothing was broken; the feature didn't exist.
+- **8.1 DONE** — `-buddyhostile` flag parsed in `P_AICoop_Init` (p_ai_coop.c); statics `buddy_hostile` / `hostile_respawn` / `hostile_was_dead`, `HOSTILE_RESPAWN_TICS` (5 s), `P_AICoop_HostileMode()` accessor added to p_ai_coop.h.
+- **8.2 DONE** — `AICoop_FindTarget` hostile short-circuit: returns the nearest live human (new `AICoop_HostileTarget`, defined after `AICoop_NearestHuman`) with `P_CheckSight` gate; NULL without LOS so the normal hunt logic closes distance.
+- **8.3 DONE** — hostile combat branch at the top of the BuildCmd priority chain (fight on LOS, press to 96u without), aim-line FF guard disabled in hostile mode so the buddy actually fires at the player, director "attack" orders ignored, no "ff:" protest callout in `P_AICoop_NoteDamage`.
+- **8.4 DONE** — p_inter.c `-nofriendlyfire` gate now `&& !P_AICoop_HostileMode()` so human↔buddy damage is legal in hostile mode. Audited the other damage gates: none block player-shooter→player-target (ff_protect defaults 0, buddy's player mobj carries no MF_FRIEND, retaliation guard is MF_FRIEND-target-only, MT_TURRET/MT_XPOISONCLOUD don't apply).
+- **8.5 DONE** — auto-respawn in the PST_DEAD branch of BuildCmd: once-per-death latch arms a 5 s timer, then `P_TeleportMove` to the recorded spawn + `P_AICoop_Revive(FullHealth())` (engine's own stand-up path). Chose revive-in-place-at-home over PST_REBORN because SP `G_DoReborn` reloads the whole level on any reborn. Latch cleared in the LIVE path + per level in `P_AICoop_ResetSlot`.
+- Sanity checks: brace/paren balance OK on p_ai_coop.c / p_inter.c / p_ai_coop.h (new `nemesis/bracecheck.py` helper; no C toolchain here, so no real compile).
+- PLAN updated: new §8 (Phase 8, all boxes [x] with the compile caveat), §9–11 renumbered to §9 Phase 7 demo / §10 non-goals / §11 ledger / §12 cheat sheet (+ hostile launch line).
+- **Blocked as before:** compile verification rides the one-shot toolchain rebuild together with the Phase 0.1 listener fix, NEM_EVENTMAX 64 and the HUD work. Until then, run the PREBUILT exe = no hostility, no auto-respawn (and launch with `-buddyhostile` once rebuilt).

@@ -44,6 +44,10 @@ int  P_AICoop_Slot (void);
 boolean P_AICoop_IsBuddy (player_t* p);
 boolean P_Buddy_UsesMonsterAttack (player_t* p);	// buddy fights with a BUDDYDEF monster attack, not its weapon
 
+// Phase 8: -buddyhostile mode -- the buddy is a hostile training opponent (it
+// fights the human, and player-vs-player damage bypasses -nofriendlyfire).
+int  P_AICoop_HostileMode (void);
+
 // Current buddy state as a small enum (0=follow, 1=fight, 2=heal, 3=hold,
 // 4=come, 5=grab).  Exposed for the console / voice system.
 int  P_AICoop_State (void);

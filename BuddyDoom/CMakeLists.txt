@@ -65,6 +65,8 @@ if(WIN32)
     target_link_libraries(buddydoom PRIVATE ws2_32)           # i_net.c / p_ai_llm.c
     if(MSVC)
         target_link_libraries(buddydoom PRIVATE dbghelp)      # i_main.c crash handler (StackWalk64/Sym*/MiniDumpWriteDump)
+    elseif(WIN32)
+        target_link_libraries(buddydoom PRIVATE dbghelp)      # same, MinGW: libdbghelp.a ships with the toolchain
     endif()
     # copy the SDL3 runtime DLL next to the exe + into run/
     add_custom_command(TARGET buddydoom POST_BUILD

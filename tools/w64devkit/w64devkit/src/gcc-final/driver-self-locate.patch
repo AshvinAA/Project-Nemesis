@@ -1,0 +1,54 @@
+Self-locate the driver, and search its directory for subprograms
+
+The driver otherwise trusts argv[0], which requires a PATH search when
+it lacks a directory component, as with w64devkit command aliases. Nor
+does it search its own directory for as and ld, which w64devkit keeps
+in bin/ rather than a tooldir. With this patch the toolchain works
+without w64devkit bin/ in PATH.
+--- a/gcc/gcc.cc
++++ b/gcc/gcc.cc
+@@ -56,6 +56,11 @@ compilation is specified by a string called a "spec".  */
+ #include "opts-diagnostic.h"
+ #include "auto-profile.h" /* for AUTO_PROFILE_VERSION.  */
+ 
++#ifdef __MINGW32__
++extern "C" __declspec(dllimport) unsigned __stdcall
++GetModuleFileNameA (void *, char *, unsigned);
++#endif
++
+ #ifndef MATH_LIBRARY
+ #define MATH_LIBRARY "m"
+ #endif
+@@ -5566,6 +5571,17 @@ process_command (unsigned int decoded_options_count,
+ 	      "BINUTILS", PREFIX_PRIORITY_LAST, 0, 1);
+   free (tooldir_prefix);
+ 
++#ifdef __MINGW32__
++  /* Also search the driver's own directory for subprograms.  */
++  {
++    const char *argv0 = decoded_options[0].arg;
++    size_t dirlen = lbasename (argv0) - argv0;
++    if (dirlen)
++      add_prefix (&exec_prefixes, xstrndup (argv0, dirlen),
++		  "BINUTILS", PREFIX_PRIORITY_LAST, 0, 0);
++  }
++#endif
++
+ #if defined(TARGET_SYSTEM_ROOT_RELOCATABLE) && !defined(VMS)
+   /* If the normal TARGET_SYSTEM_ROOT is inside of $exec_prefix,
+      then consider it to relocate with the rest of the GCC installation
+@@ -8307,6 +8323,14 @@ driver::main (int argc, char **argv)
+   bool early_exit;
+ 
+   set_progname (argv[0]);
++#ifdef __MINGW32__
++  /* argv[0] may be a bare name resolved through PATH, or an alias in
++     another directory.  Self-locate so that neither matters.  */
++  static char self[260];
++  unsigned selflen = GetModuleFileNameA (0, self, sizeof self);
++  if (selflen && selflen < sizeof self)
++    argv[0] = self;
++#endif
+   expand_at_files (&argc, &argv);
+   decode_argv (argc, const_cast <const char **> (argv));
+   global_initializations ();

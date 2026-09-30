@@ -1,8 +1,8 @@
-# Install script for directory: C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom
+# Install script for directory: F:/Project-Nemesis/BuddyDoom
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "C:/Program Files/BuddyDoom")
+  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/BuddyDoom")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -32,10 +32,15 @@ if(NOT DEFINED CMAKE_CROSSCOMPILING)
   set(CMAKE_CROSSCOMPILING "FALSE")
 endif()
 
+# Set path to fallback-tool for dependency-resolution.
+if(NOT DEFINED CMAKE_OBJDUMP)
+  set(CMAKE_OBJDUMP "F:/Project-Nemesis/tools/w64devkit/w64devkit/bin/objdump.exe")
+endif()
+
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/install_local_manifest.txt"
+  file(WRITE "F:/Project-Nemesis/BuddyDoom/build/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -51,6 +56,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "C:/Users/SHAHRIAR/Desktop/Project-Nemesis/BuddyDoom/build/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "F:/Project-Nemesis/BuddyDoom/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

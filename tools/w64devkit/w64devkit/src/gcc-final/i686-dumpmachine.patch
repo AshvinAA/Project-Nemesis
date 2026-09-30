@@ -1,0 +1,23 @@
+Report the emulated i686 target from i686 driver aliases
+
+The multilib compiler is configured for x86_64, so -m32 does not change
+-dumpmachine.  The i686 aliases present themselves as target-prefixed
+compilers, and target-detecting build systems expect that prefix and
+-dumpmachine to agree.  Preserve normal multilib behavior for every other
+invocation name.
+--- a/gcc/gcc.cc
++++ b/gcc/gcc.cc
+@@ -4249,6 +4249,13 @@ driver_handle_option (struct gcc_options *opts,
+       exit (0);
+ 
+     case OPT_dumpmachine:
++#ifdef __MINGW32__
++      if (startswith (progname, "i686-w64-mingw32-"))
++	{
++	  printf ("i686-w64-mingw32\n");
++	  exit (0);
++	}
++#endif
+       printf ("%s\n", spec_machine);
+       exit (0);
+ 

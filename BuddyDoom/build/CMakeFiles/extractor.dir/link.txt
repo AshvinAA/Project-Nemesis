@@ -1,0 +1,3 @@
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cmake.exe -E rm -f CMakeFiles\extractor.dir/objects.a
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\ar.exe qc CMakeFiles\extractor.dir/objects.a @CMakeFiles\extractor.dir\objects1.rsp
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cc.exe -O3 -DNDEBUG -mwindows -Wl,--whole-archive CMakeFiles\extractor.dir/objects.a -Wl,--no-whole-archive -o extractor.exe -Wl,--out-implib,libextractor.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\extractor.dir\linkLibs.rsp

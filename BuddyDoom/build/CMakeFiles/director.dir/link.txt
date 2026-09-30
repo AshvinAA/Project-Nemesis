@@ -1,0 +1,3 @@
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cmake.exe -E rm -f CMakeFiles\director.dir/objects.a
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\ar.exe qc CMakeFiles\director.dir/objects.a @CMakeFiles\director.dir\objects1.rsp
+F:\Project-Nemesis\tools\w64devkit\w64devkit\bin\cc.exe -O3 -DNDEBUG -mwindows -Wl,--whole-archive CMakeFiles\director.dir/objects.a -Wl,--no-whole-archive -o director.exe -Wl,--out-implib,libdirector.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\director.dir\linkLibs.rsp

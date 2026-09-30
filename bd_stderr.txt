@@ -1,0 +1,6 @@
+I_InitSound:  configured audio device (new multi-stream mixer)
+I_InitSound:  pre-cached all sound data
+I_InitSound: sound module ready
+I_Voice: loaded buddy voice WAD 'buddydoom.wad'
+P_Director: stress tracking ON for the LLM director (-aidirector)
+S_Init: default sfx volume 8
