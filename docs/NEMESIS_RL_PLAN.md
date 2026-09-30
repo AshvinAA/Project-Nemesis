@@ -3,7 +3,7 @@
 > This is the working plan for the **Q-learning Shotgun Guy** ("Jev learns to fight").
 > It supersedes the original brief's clean-room design where the repo has already
 > solved the problem. **Progress log is at the bottom — append an entry after every
-> finished task.** Decision ledger in §11.
+> finished task.** Decision ledger in §12.
 
 **Status legend:** `[ ]` todo · `[~]` in progress · `[x]` DONE
 
@@ -134,17 +134,59 @@ and *what happens on death* change. No stat buffs (health/armor/ammo untouched).
 - [x] **8.7 Docs:** this section + progress log + HANDOFF.md §3.5 (Phase 8 writeup,
       `-buddyhostile` launch line).
 
-## 9. Phase 7 — Demo video **[ ]**
+## 9. Phase 9 — Skill curriculum + weight-evolution dashboard **[x]** (BUILT + live-verified 2026-10-01)
+
+User brief: "the buddy is too strong at first, he is suppose to be really dumb (almost useless) and then gradually smarten by learning from my patterns. Also make a dashboard that monitors how jev is basically changing the weights."
+
+- [x] **9.1 C — skill tables** (p_ai_coop.c): `buddy_skill` 0..4 mirror of the persisted
+      `NEM_BuddySkill()`; four tables shape the hostile buddy with NO stat buffs:
+      `skill_react[5]`={52,35,20,10,4} tics before first reaction, `skill_turn[5]`={400,900,1300,1300,1300}
+      turn clamp, `skill_trig[5]`={1,3,6,8,9} of 9 tics allowed to pull the trigger,
+      `skill_stand[5]`={448,384,320,256,192} keep-away distance, plus aim jitter `(4-skill)*6` on lookdir.
+      Level 0 = clueless (can barely aim/fire), level 4 = veteran.
+- [x] **9.2 C — persistence + auto-lessons** (p_nemesis.c): `nem_buddy_skill` persisted as trailing
+      int in `nemesis_memory.dat` (old files fail read → 0; clamped 0..4); serialized as
+      `nemesis.buddy_skill` in observe. Engine-earned lessons: +1 when the buddy dies
+      (`NEM_BuddyDeathLesson`), −1 when it kills the human (`NEM_NoteBuddyKillPlayer` from p_inter.c);
+      console prints promote/demote.
+- [x] **9.3 C — protocol** (p_ai_llm.c): `buddy skill=N` token (trainer override; no-op when not
+      hostile); `P_AICoop_SetSkill/P_AICoop_Skill` + header decls; skill resumes at the persisted
+      level on `-buddyhostile` launch.
+- [x] **9.4 Python — curriculum** (`nemesis/curriculum.py`): `SkillCurriculum` reconciles engine
+      auto-lessons from observe, pushes the policy level every 5 completed episodes
+      (`SKILL_EPISODES_PER_LEVEL`), never demotes an engine-earned lesson; levels named
+      clueless/recruit/competent/sharp/veteran (config.py).
+- [x] **9.5 Python — telemetry** (`nemesis/livestate.py`): `LiveState` keeps `nemesis/live_state.json`
+      fresh (~4 Hz, tmp+os.replace atomic) and appends 1 Hz compact rows (episode/ε/skill/reward/weights)
+      to `nemesis/log/state_history.jsonl`.
+- [x] **9.6 Python — dashboard** (`nemesis/dashboard.py`): zero-dep `http.server` console on :8787
+      (dark theme, vanilla JS): buddy-skill meter with level names, learned-weight heatmap
+      (types × orders, green rewarded / red punished), weapon-bias panel, ε/episode/survival gauges,
+      3 canvas sparklines from history, live event ticker. `/state` + `/history` endpoints;
+      standalone mode reads files with the agent down (`python -m nemesis.dashboard`).
+- [x] **9.7 Wiring** (`nemesis/rl_agent.py`): dashboard auto-starts with the agent (`--no-dashboard`
+      to skip), curriculum reconciles every poll + pushes on episode_end, ticker feeds the snapshot;
+      test_selftest + test_phase2 PASS (selftest boots and shuts down the real dashboard).
+- [x] **9.8 Live verification**: A/B on freedoom1 E1M1 `-nomonsters -buddyhostile` (window focused,
+      same 12 s sampling, `buddy skill=N` acked `ok`): skill 0 → 21 dmg (mostly one opening
+      point-blank blast), skill 4 → 64 dmg in ~2 s of live play (rest of window was focus-frozen tics).
+      Full-stack: agent episode completed, dashboard served live state + 22 history rows,
+      `buddy_skill` visible in observe, persisted skill survives restart, `rm nemesis_memory.dat` resets.
+- KNOWN WRINKLE: `NEM_BuddyDeathLesson` fires on ANY shotgunguy death — including the RL nemesis
+      monster itself — so every nemesis death during training also promotes the buddy (an accidental
+      second curriculum signal alongside the trainer's). See D10.
+
+## 10. Phase 7 — Demo video **[ ]**
 
 - [ ] Reset-on-camera, narrate HUD (ep/ε/reward), fight at ep 1 vs ep ~25 vs random control.
 
-## 10. Out of scope / non-goals (re-confirmed)
+## 11. Out of scope / non-goals (re-confirmed)
 
 - No DNN, no stat buffs, no C-embedded learning, no overlay tool (HUD via `C_Printf`).
 - `jev/` bridge untouched and OFF during RL sessions (single-client listener).
 - Map pinned for training (geometry-dependent buckets); map id stored in qtable header.
 
-## 11. Decision ledger
+## 12. Decision ledger
 
 | # | Decision | Choice | Status |
 |---|---|---|---|
@@ -157,8 +199,9 @@ and *what happens on death* change. No stat buffs (health/armor/ammo untouched).
 | D7 | `nemesis propose` sync | Q-table-only v1; C-table sync optional later | OPEN (reco: Q-only) |
 | D8 | Crash dump relevance | Stale Sep 25 buddy-nav artifact — unrelated | RESOLVED |
 | D9 | Build toolchain | Portable w64devkit (GCC 16.2) + CMake 3.31.6 in `tools/` on F: — no admin needed; C: is 99% full so VS BuildTools cannot install (0x80070070). `tools/build_buddydoom.bat` = one-command build | LOCKED |
+| D10 | Buddy auto-lesson scope | `NEM_BuddyDeathLesson` fires on ANY shotgunguy death incl. the RL nemesis's own deaths — a second, accidental curriculum signal. Acceptable now; gate to non-nemesis kills if it fights the trainer's pacing | OPEN (reco: keep, watch pacing) |
 
-## 12. Run cheat sheet (from HANDOFF.md — verified)
+## 13. Run cheat sheet (from HANDOFF.md — verified)
 
 ```sh
 # Build engine (WORKING on this machine — portable MinGW toolchain, no admin)
@@ -179,13 +222,16 @@ powershell -Command "Start-Process -FilePath 'BuddyDoom\run\buddydoom.exe' -Argu
 # Probe protocol (close properly or the listener wedges — pre-0.1)
 node -e "const net=require('net');const s=net.connect(31666,'127.0.0.1',()=>s.write('observe\n'));let b='';s.on('data',d=>{b+=d;if(b.includes('\n')){console.log(b.slice(0,300));s.end();process.exit(0)}});"
 
+# Dashboard (auto-starts with the agent on :8787; standalone reads files)
+python -m nemesis.dashboard --port 8787
+
 # Reset learned state
 rm BuddyDoom/run/nemesis_memory.dat
 ```
 
 ---
 
-## 12. PROGRESS LOG (append after every finished task)
+## 14. PROGRESS LOG (append after every finished task)
 
 **2026-09-30 — Phases 3–6 + live baseline**
 - **Phase 3 DONE** — `nemesis/qtable.py` (576×8, ε-greedy w/ random tie-break, brief's update, α/ε linear schedules with floors, versioned JSON w/ atomic tmp-replace save); `nemesis/trainer.py` synthetic-duel offline trainer → **PASS**: polls survived 5.6→10.2 (first5 vs last5, 60 eps), held-out greedy −88.7 vs random −90.4.
@@ -239,3 +285,13 @@ rm BuddyDoom/run/nemesis_memory.dat
 - **Gotcha learned:** the game pauses its tic loop when the window loses focus — remote probes see a frozen tic and look like a hang. First launch "deaths" were this plus manual window closes; foreground the window (AppActivate) before tracing.
 - Auto-respawn (the 5 s teleport-home revive) is implemented on the verified battle path but still needs a **human playtest** to call it fully verified: kill the buddy, watch it come back at its spawn ~5 s later.
 - Untested in the new build so far: HUD rendering (`hud=` token), event ring 64 in live observe, buddy `see_buddy` flags in hostile mode.
+
+**2026-10-01 — Phase 9 BUILT and live-verified (session 4): skill curriculum + weight-evolution dashboard**
+- User request: buddy starts "really dumb (almost useless)" and gradually smartens by learning; plus a "really cool" dashboard watching the weights move.
+- **C side** (compiled into the [100%] build): skill tables in p_ai_coop.c (react/turn/trigger/keep-away + aim jitter, no stat buffs), `buddy skill=N` token, SetSkill/Skill + mirror re-sync, persisted `nem_buddy_skill` in nemesis_memory.dat, engine auto-lessons (+1 buddy death / −1 kills player), `buddy_skill` in observe.
+- **Python side**: config keys; `curriculum.py` (policy: +1 level/5 episodes, absorbs auto-lessons, never demotes); `livestate.py` (atomic 4 Hz snapshot + 1 Hz history jsonl); `dashboard.py` (stdlib server, embedded dark console: skill meter, weight heatmap, sparklines, ticker); wired into `rl_agent.run()` (auto-start + `--no-dashboard`).
+- Tests: selftest + phase2 PASS (selftest exercises the real dashboard boot/shutdown). py_compile clean.
+- **A/B live** (focused window, 12 s windows, explicit skill pushes): skill 0 → 21 dmg (~1.8/s), skill 4 → 64 dmg in ~2 s of live tics (~31/s). Clueless is near-harmless; veteran shreds. Tooling note: cmd-started game processes die with the timing-out shell (job-object kill) — plain `Start-Process` (no redirects) is the reliable launch; inline PowerShell here-strings get mangled in bash, use script files (`tools/focus_buddydoom.ps1`).
+- Full-stack: agent ran 25 s (ep 3, +150 terminal, dashboard up at :8787), live_state.json + 22 history rows written, standalone dashboard served them all.
+- D10 logged: the buddy-death auto-lesson also fires on the RL nemesis's own deaths (shotgunguy type conflation) — acceptable, watch pacing.
+- Files: nemesis/{config,curriculum,livestate,dashboard,rl_agent}.py; BuddyDoom/files/{p_ai_coop.c,p_nemesis.c,p_nemesis.h,p_ai_llm.c,p_inter.c}; docs here; disposables `nemesis/tmp_ab.js` + `tools/focus_buddydoom.ps1` recreated for probes.
