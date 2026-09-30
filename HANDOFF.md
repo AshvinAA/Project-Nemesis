@@ -433,11 +433,17 @@ happens on death differ. No stat buffs (health/armor/ammo untouched).
 # Bridge: offline full-pipeline demo (no key, no game)
 cd jev && npm install && npm test && npm run replay
 
-# Engine build (MSVC toolchain via VS BuildTools CMake)
+# Engine build (WORKING on this machine, 2026-09-30 — portable MinGW toolchain on F:)
+cmd //c "F:\\Project-Nemesis\\tools\\build_buddydoom.bat"
+# w64devkit GCC 16.2 + CMake 3.31.6, both in tools/ (no admin; C: is 99% full so
+# VS BuildTools can't install — 0x80070070). One-shot MinGW fixes live in source:
+# (char*) Winsock casts + dbghelp linked on all Windows toolchains (CMakeLists.txt).
+# → BuddyDoom/run/buddydoom.exe (staged by CMake)
+
+# Legacy path (MSVC via VS BuildTools CMake — NOT installable on this machine)
 CMAKE="/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
 "$CMAKE" -B BuddyDoom/build -S BuddyDoom -A x64
 "$CMAKE" --build BuddyDoom/build --config Release --target buddydoom
-# → BuddyDoom/run/buddydoom.exe (staged by CMake)
 
 # Live game (PowerShell Start-Process; cmd start hangs!)
 powershell -Command "Start-Process -FilePath 'BuddyDoom\run\buddydoom.exe' -ArgumentList '-iwad','freedoom1.wad','-warp','1','1','-skill','3','-aidirector','31666' -WorkingDirectory 'BuddyDoom\run'"

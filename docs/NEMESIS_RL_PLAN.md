@@ -90,7 +90,7 @@
 
 **Done =** ✅ orchestrator ready; the actual demo curve requires the rebuild + live sessions (human player in the loop).
 
-## 8. Phase 8 — Hostile-buddy training opponent **[x]** (source; compile pending rebuild)
+## 8. Phase 8 — Hostile-buddy training opponent **[x]** (BUILT + live-verified 2026-09-30)
 
 Makes the co-op buddy marine fight the PLAYER as a training opponent, with auto-respawn
 on death. Movement/aim AI reused as-is — only *who* it targets, *what damage is legal*,
@@ -122,9 +122,17 @@ and *what happens on death* change. No stat buffs (health/armor/ammo untouched).
       level in `P_AICoop_ResetSlot`. No PST_REBORN (avoids the SP level-reload). corpse
       stays non-solid (no USE-reborn exploit); one dead marine on the intermission
       screen is cosmetic.
-- [x] **8.6 Docs:** this section + progress log. **Blocked:** compile verification — no C
-      toolchain on this machine; changes ride the pending one-shot rebuild (§12) together
-      with the Phase 0.1 listener fix, NEM_EVENTMAX 64 and the HUD work.
+- [x] **8.6 Build + live verification (2026-09-30):** compiled with the portable MinGW
+      toolchain (see §12/D9) after 3 toolchain-side fixes: `(char*)` casts for Winsock
+      sendto/recvfrom/setsockopt (i_net.c, p_ai_llm.c), dbghelp link widened to all Windows
+      toolchains in CMakeLists.txt. LIVE A/B on freedoom1 E1M1 with `-nomonsters`:
+      with `-buddyhostile` the idle player drops to hp=0 within seconds (buddy is the only
+      damage source); without the flag hp stays 100. Listener re-accept fix also verified
+      live: an RST-abort probe no longer wedges :31666 (old build wedged permanently).
+      NOTE: the game pauses on focus loss — probe results freeze while the window is in
+      the background; bring it to the foreground or expect stale tics.
+- [x] **8.7 Docs:** this section + progress log + HANDOFF.md §3.5 (Phase 8 writeup,
+      `-buddyhostile` launch line).
 
 ## 9. Phase 7 — Demo video **[ ]**
 
@@ -148,11 +156,16 @@ and *what happens on death* change. No stat buffs (health/armor/ammo untouched).
 | D6 | Q-table scope | Per-map v1 (map id in header) | OPEN (reco: per-map) |
 | D7 | `nemesis propose` sync | Q-table-only v1; C-table sync optional later | OPEN (reco: Q-only) |
 | D8 | Crash dump relevance | Stale Sep 25 buddy-nav artifact — unrelated | RESOLVED |
+| D9 | Build toolchain | Portable w64devkit (GCC 16.2) + CMake 3.31.6 in `tools/` on F: — no admin needed; C: is 99% full so VS BuildTools cannot install (0x80070070). `tools/build_buddydoom.bat` = one-command build | LOCKED |
 
 ## 12. Run cheat sheet (from HANDOFF.md — verified)
 
 ```sh
-# Build engine (MSVC via VS BuildTools CMake)
+# Build engine (WORKING on this machine — portable MinGW toolchain, no admin)
+cmd //c "F:\\Project-Nemesis\\tools\\build_buddydoom.bat"
+# (configures BuddyDoom/build with "MinGW Makefiles" on first run, then builds)
+
+# Alternative (needs VS 2022 BuildTools installed — NOT possible here, C: full)
 CMAKE="/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
 "$CMAKE" -B BuddyDoom/build -S BuddyDoom -A x64
 "$CMAKE" --build BuddyDoom/build --config Release --target buddydoom
@@ -214,3 +227,15 @@ rm BuddyDoom/run/nemesis_memory.dat
 - Sanity checks: brace/paren balance OK on p_ai_coop.c / p_inter.c / p_ai_coop.h (new `nemesis/bracecheck.py` helper; no C toolchain here, so no real compile).
 - PLAN updated: new §8 (Phase 8, all boxes [x] with the compile caveat), §9–11 renumbered to §9 Phase 7 demo / §10 non-goals / §11 ledger / §12 cheat sheet (+ hostile launch line).
 - **Blocked as before:** compile verification rides the one-shot toolchain rebuild together with the Phase 0.1 listener fix, NEM_EVENTMAX 64 and the HUD work. Until then, run the PREBUILT exe = no hostility, no auto-respawn (and launch with `-buddyhostile` once rebuilt).
+
+**2026-09-30 — Phase 8 BUILT and live-verified (session 3)**
+- Diff review done first: one cleanup (dropped a redundant "lvlstart:" callout — `P_AICoop_Revive` already says "revived:"); everything else correct as written.
+- HANDOFF.md updated: new §3.5 (Phase 8 writeup), §6.4 listener issue marked FIXED-in-source, `-buddyhostile` launch line in §8, header dates.
+- **Toolchain saga:** VS BuildTools via winget died twice — first exit 1602 (silent UAC can't prompt), then a manual UAC approval got the installer running but it failed with 0x80070070: **C: has only 2.1 GB free (99% full)**, VS needs ~10 GB. Pivoted to a **portable, no-admin toolchain on F:**: `tools/w64devkit` (GCC 16.2, Make 4.4.1) + `tools/cmake-3.31.6-windows-x86_64` (3.x pinned: CMake 4.x would reject the engine's old `cmake_minimum_required`). One-command build: `tools/build_buddydoom.bat` (pins PATH, sets `CMAKE_PREFIX_PATH` to the sibling SDL3 SDK, configures "MinGW Makefiles", builds the buddydoom target). D9 LOCKED.
+- **3 toolchain-side fixes to compile with MinGW/GCC-16** (MSVC tolerated all of these): `(char*)` casts on Winsock `sendto`/`recvfrom` buffers (i_net.c) and `setsockopt` (p_ai_llm.c); dbghelp link widened `if(MSVC)` → `elseif(WIN32)` in CMakeLists.txt (w64devkit ships libdbghelp.a). All zero-behavior-change.
+- **[100%] Built target buddydoom** — the one pending rebuild now includes: Phase 8 hostile mode, Phase 0.1 listener re-accept fix, NEM_EVENTMAX 64, HUD set/print + `hud=` token. Fresh exe staged to `BuddyDoom/run/buddydoom.exe`.
+- **Live verification (freedoom1 E1M1, `-nomonsters` A/B):** with `-buddyhostile` the idle player drops to **hp=0 within seconds** (buddy is the only possible damage source — monsters are off); without the flag hp stays **100** across 5+ minutes of tics. Console prints "HOSTILE BUDDY MODE … respawns 5 s". Hostility + damage path CONFIRMED.
+- **Listener fix CONFIRMED live:** probe #1 hard-aborts (RST), probe #2 still gets a full observe — `LISTENER_SURVIVED_ABRUPT_DISCONNECT` (the pre-fix build wedged permanently on exactly this test).
+- **Gotcha learned:** the game pauses its tic loop when the window loses focus — remote probes see a frozen tic and look like a hang. First launch "deaths" were this plus manual window closes; foreground the window (AppActivate) before tracing.
+- Auto-respawn (the 5 s teleport-home revive) is implemented on the verified battle path but still needs a **human playtest** to call it fully verified: kill the buddy, watch it come back at its spawn ~5 s later.
+- Untested in the new build so far: HUD rendering (`hud=` token), event ring 64 in live observe, buddy `see_buddy` flags in hostile mode.
