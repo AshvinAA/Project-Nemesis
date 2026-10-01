@@ -40,4 +40,5 @@ CMakeFiles/buddydoom.dir/files/p_nemesis.c.obj: \
  F:\Project-Nemesis\BuddyDoom\files\strife_mt.inc \
  F:\Project-Nemesis\BuddyDoom\files\p_mobj.h \
  F:\Project-Nemesis\BuddyDoom\files\d_ticcmd.h \
- F:\Project-Nemesis\BuddyDoom\files\p_nemesis.h
+ F:\Project-Nemesis\BuddyDoom\files\p_nemesis.h \
+ F:\Project-Nemesis\BuddyDoom\files\p_ai_coop.h

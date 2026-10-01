@@ -172,6 +172,15 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       point-blank blast), skill 4 → 64 dmg in ~2 s of live play (rest of window was focus-frozen tics).
       Full-stack: agent episode completed, dashboard served live state + 22 history rows,
       `buddy_skill` visible in observe, persisted skill survives restart, `rm nemesis_memory.dat` resets.
+- [x] **9.9 Instant player respawn** (g_game.c + p_user.c): in hostile mode the human auto-reborns
+      in `P_DeathThink` (no USE press) and `G_DoReborn` takes a new in-place gate —
+      `G_PlayerReborn` + `P_SpawnPlayer` at the level start instead of the single-player
+      `ga_loadlevel` reload (a reload would despawn the nemesis and reset the training setup).
+      Live-verified: death → back at 100 hp after 5 tics, nemesis mobj keeps the same id (no reload).
+- [x] **9.10 Skill HUD** (p_ai_coop.c `P_AICoop_SkillHud` + p_nemesis.c): `[buddy] skill N/4 (name)`
+      rides the existing 1 Hz `NEM_HUDPrint` slot, with a store-driven fallback so the level stays
+      visible even without the agent connected; the agent's `hud=` spec now carries `sk=N` too.
+      Plain bracket-tag style, matching the codebase's `[nemesis]`/`[llm]` conventions.
 - KNOWN WRINKLE: `NEM_BuddyDeathLesson` fires on ANY shotgunguy death — including the RL nemesis
       monster itself — so every nemesis death during training also promotes the buddy (an accidental
       second curriculum signal alongside the trainer's). See D10.
@@ -295,3 +304,11 @@ rm BuddyDoom/run/nemesis_memory.dat
 - Full-stack: agent ran 25 s (ep 3, +150 terminal, dashboard up at :8787), live_state.json + 22 history rows written, standalone dashboard served them all.
 - D10 logged: the buddy-death auto-lesson also fires on the RL nemesis's own deaths (shotgunguy type conflation) — acceptable, watch pacing.
 - Files: nemesis/{config,curriculum,livestate,dashboard,rl_agent}.py; BuddyDoom/files/{p_ai_coop.c,p_nemesis.c,p_nemesis.h,p_ai_llm.c,p_inter.c}; docs here; disposables `nemesis/tmp_ab.js` + `tools/focus_buddydoom.ps1` recreated for probes.
+
+**2026-10-01 — Phase 9.9/9.10 BUILT and live-verified (session 4 cont.): instant player respawn + skill HUD**
+- User request: player respawns immediately after death; skill display in the HUD.
+- **Instant respawn:** `P_DeathThink` auto-sets PST_REBORN under hostile mode (no USE press); `G_DoReborn` gained a hostile-mode gate that runs the in-place reborn (`G_PlayerReborn` + `P_SpawnPlayer` at the level start) instead of SP's `ga_loadlevel` full reload — a reload would despawn the nemesis and reset the training setup every death.
+- **Skill HUD:** `P_AICoop_SkillHud()` prints `[buddy] skill N/4 (name)` riding the 1 Hz `NEM_HUDPrint` slot (store-driven fallback keeps it visible with no agent); Python `hud_spec(..., skill=curriculum.level)` appends `sk=N` to the `[nemesis]` line.
+- Rebuilt [100%]; selftest + phase2 PASS. Live: death → hp 100 after **5 tics**, nemesis id unchanged across the death (proves no level reload); agent orders with `sk=0` hud spec all `ok`.
+- Tooling: `tools/focus_buddydoom.ps1` hardened with the Alt-tap foreground unlock + minimize/restore cycle (Windows refused plain SetForegroundWindow from a background caller); rebuild fails with "Permission denied" staging the exe if a game instance is still running — kill first.
+- Dropped an `\x1c` color escape from the HUD line before shipping — this codebase uses plain bracket tags only.

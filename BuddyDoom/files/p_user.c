@@ -293,6 +293,13 @@ void P_DeathThink (player_t* player)
 
     if (player->cmd.buttons & BT_USE)
 	player->playerstate = PST_REBORN;
+
+    // Phase 9.9: hostile-buddy training respawns -- reborn automatically (no
+    // USE press needed).  G_DoReborn's hostile gate consumes the state next
+    // tic via the in-place G_PlayerReborn + P_SpawnPlayer path (no level
+    // reload), so the training setup (nemesis + buddy) survives the death.
+    if (P_AICoop_HostileMode ())
+	player->playerstate = PST_REBORN;
 }
 
 

@@ -667,6 +667,28 @@ int P_AICoop_Skill (void)
     return buddy_hostile ? buddy_skill : -1;
 }
 
+// Phase 9.9: buddy-skill HUD line.  Display only -- rides the existing 1 Hz
+// NEM_HUDPrint slot (the Python agent's hud= spec); when the agent is away,
+// NEM_HUDFallback keeps the skill visible from the store (which still learns
+// via NEM_TacticNote even without the trainer).
+static const char* skill_name (int level)
+{
+    switch (level)
+    {
+	case 0: return "clueless";
+	case 1: return "recruit";
+	case 2: return "competent";
+	case 3: return "sharp";
+	default: return "veteran";
+    }
+}
+
+void P_AICoop_SkillHud (void)
+{
+    int level = NEM_BuddySkill ();
+    C_Printf ("[buddy] skill %d/4 (%s)\n", level, skill_name (level));
+}
+
 // Public read-only accessor for coop_state (used by c_console.c for the voice
 // tag mapping).  Returns -1 if the buddy is inactive.
 int P_AICoop_State (void)

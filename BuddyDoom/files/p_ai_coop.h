@@ -53,6 +53,10 @@ int  P_AICoop_HostileMode (void);
 int  P_AICoop_SetSkill (int level);
 int  P_AICoop_Skill (void);
 
+// Phase 9.9: 1 Hz HUD line showing the buddy-skill curriculum level (display
+// only, rides the NEM_HUDPrint slot).
+void P_AICoop_SkillHud (void);
+
 // Current buddy state as a small enum (0=follow, 1=fight, 2=heal, 3=hold,
 // 4=come, 5=grab).  Exposed for the console / voice system.
 int  P_AICoop_State (void);

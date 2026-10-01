@@ -30,6 +30,7 @@
 #include "info.h"		// mobjinfo_t
 #include "d_items.h"		// weaponinfo
 #include "p_nemesis.h"
+#include "p_ai_coop.h"		// Phase 9.9: P_AICoop_SkillHud (buddy-skill HUD line)
 
 // Console text (metrics HUD). Matches c_console.c's signature.
 void C_Printf (const char* fmt, ...);
@@ -601,12 +602,19 @@ void NEM_HUDSet (const char* hud_spec)
 void NEM_HUDPrint (void)
 {
     static int next_print;
-    if (!nem_hud[0]) return;
     if ((int)gametic < next_print) return;
     next_print = (int)gametic + TICRATE;
-    // staler than 10 s -> the agent is gone; say so once per print slot
-    if ((unsigned)(gametic - (int)nem_hud_stamp) > 10u * TICRATE)
-	C_Printf ("[nemesis] (stale) %s\n", nem_hud);
-    else
-	C_Printf ("[nemesis] %s\n", nem_hud);
+    if (nem_hud[0])
+    {
+	// staler than 10 s -> the agent is gone; say so once per print slot
+	if ((unsigned)(gametic - (int)nem_hud_stamp) > 10u * TICRATE)
+	    C_Printf ("[nemesis] (stale) %s\n", nem_hud);
+	else
+	    C_Printf ("[nemesis] %s\n", nem_hud);
+    }
+    // Phase 9.9: the buddy-skill line rides the same 1 Hz slot; the fallback
+    // keeps it visible even with no agent connected (the store still learns
+    // via NEM_TacticNote)
+    if (NEM_BuddySkill () >= 0)
+	P_AICoop_SkillHud ();
 }

@@ -1221,7 +1221,23 @@ void G_DeathMatchSpawnPlayer (int playernum)
 void G_DoReborn (int playernum) 
 { 
     int                             i; 
-	 
+
+    // Phase 9.9: hostile-buddy training respawns -- the human comes back at
+    // the level start in place instead of reloading the whole map (a reload
+    // would despawn the nemesis and reset the training setup).  The player
+    // auto-reborns in P_DeathThink (no USE press needed) once per death.
+    if (P_AICoop_HostileMode ()
+	&& players[playernum].mo
+	&& players[playernum].playerstate == PST_REBORN)
+    {
+	players[playernum].mo->player = NULL;	// dissociate the corpse
+	players[playernum].playerstate = PST_LIVE;
+	G_PlayerReborn (playernum);		// stats reset, vanilla
+	P_SpawnPlayer (&playerstarts[playernum]);
+	C_Printf ("[hostile] player respawned (training continues)\n");
+	return;
+    }
+
     if (!netgame)
     {
 	// reload the level from scratch

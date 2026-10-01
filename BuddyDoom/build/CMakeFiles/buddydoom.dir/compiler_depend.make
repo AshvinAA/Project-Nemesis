@@ -6263,6 +6263,7 @@ CMakeFiles/buddydoom.dir/files/p_nemesis.c.obj: F:/Project-Nemesis/BuddyDoom/fil
   F:/Project-Nemesis/BuddyDoom/files/doomtype.h \
   F:/Project-Nemesis/BuddyDoom/files/info.h \
   F:/Project-Nemesis/BuddyDoom/files/m_fixed.h \
+  F:/Project-Nemesis/BuddyDoom/files/p_ai_coop.h \
   F:/Project-Nemesis/BuddyDoom/files/p_mobj.h \
   F:/Project-Nemesis/BuddyDoom/files/p_nemesis.h \
   F:/Project-Nemesis/BuddyDoom/files/p_pspr.h \

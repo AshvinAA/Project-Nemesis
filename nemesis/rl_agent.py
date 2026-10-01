@@ -76,9 +76,11 @@ class LiveLearner:
 
     # -- HUD metrics (Phase 5: live in-engine overlay via C_Printf) ----------
 
-    def hud_spec(self, last_action: Optional[str] = None) -> Optional[str]:
-        """ep=N,eps=F,r=F,surv=F,act=NAME — the brief's live-learning proof.
-        r = terminal reward of the last completed episode (0 before the first)."""
+    def hud_spec(self, last_action: Optional[str] = None,
+                 skill: Optional[int] = None) -> Optional[str]:
+        """ep=N,eps=F,r=F,surv=F[,sk=N][,act=NAME] — the brief's live-learning
+        proof.  r = terminal reward of the last completed episode (0 before
+        the first).  sk = hostile-buddy curriculum level (Phase 9)."""
         if not self.alive and self.q.episode == 0:
             return None
         last_r = self.rewards_log[-1] if self.rewards_log else 0.0
@@ -86,6 +88,8 @@ class LiveLearner:
                else self.q.epsilon())
         spec = (f"ep={self.episode_label()},eps={eps:.3f},r={last_r:+.1f},"
                 f"surv={self._surv_avg():.1f}")
+        if skill is not None and skill >= 0:
+            spec += f",sk={skill}"
         if last_action:
             spec += f",act={last_action}"
         return spec[:80]  # C-side NEM_HUD_MAX is 96; leave margin
@@ -274,7 +278,7 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
                 if order == "spawn":
                     if now - last_spawn_attempt > config.RESPAWN_COOLDOWN:
                         reply = link.spawn(config.NEMESIS_SPAWN_ARG, 1,
-                                           hud=learner.hud_spec())
+                                           hud=learner.hud_spec(skill=curriculum.level))
                         last_spawn_attempt = now
                         live.log_event("respawn requested — one nemesis stays alive")
                         sent_line = {"t": round(time.time(), 3), "poll": polls,
@@ -283,7 +287,8 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
                 elif ids:
                     reply = link.act(order, ids, for_tics=fort, x=anchor[0] if anchor else None,
                                      y=anchor[1] if anchor else None,
-                                     hud=learner.hud_spec(last_action=order))
+                                     hud=learner.hud_spec(last_action=order,
+                                                          skill=curriculum.level))
                     last_sent = (order, tuple(ids))
                     sent_line = {"t": round(time.time(), 3), "poll": polls,
                                  "ep": learner.episode_label(), "id": ids[0] if ids else None,
