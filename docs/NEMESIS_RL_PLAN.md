@@ -233,6 +233,18 @@ node -e "const net=require('net');const s=net.connect(31666,'127.0.0.1',()=>s.wr
 
 # Dashboard (auto-starts with the agent on :8787; standalone reads files)
 python -m nemesis.dashboard --port 8787
+# ...or watch the engine live WITHOUT the agent (observe-only, exclusive with it):
+python -m nemesis.dashboard --live
+
+# One-click launcher (double-click Nemesis.bat; desktop shortcut via
+# tools/make_shortcut.ps1, run once). Modes:
+#   Nemesis.bat            game + live dashboard + browser (hostile buddy)
+#   Nemesis.bat gameonly   just the game
+#   Nemesis.bat normal     ally buddy + monsters + dashboard
+#   Nemesis.bat agent      game + RL training agent + its dashboard
+#   Nemesis.bat dashboard  dashboard only (replays last session's files)
+#   Nemesis.bat reset      wipe nemesis_memory.dat ('reset all' also qtable)
+#   Nemesis.bat kill       close game + dashboard/agent windows
 
 # Reset learned state
 rm BuddyDoom/run/nemesis_memory.dat
@@ -312,3 +324,13 @@ rm BuddyDoom/run/nemesis_memory.dat
 - Rebuilt [100%]; selftest + phase2 PASS. Live: death → hp 100 after **5 tics**, nemesis id unchanged across the death (proves no level reload); agent orders with `sk=0` hud spec all `ok`.
 - Tooling: `tools/focus_buddydoom.ps1` hardened with the Alt-tap foreground unlock + minimize/restore cycle (Windows refused plain SetForegroundWindow from a background caller); rebuild fails with "Permission denied" staging the exe if a game instance is still running — kill first.
 - Dropped an `\x1c` color escape from the HUD line before shipping — this codebase uses plain bracket tags only.
+
+**2026-10-01 — Launcher + live dashboard upgrade (session 4 cont.): one-click play + weight-drift chart**
+- User request: no-PowerShell shortcut to start everything; dashboard that runs alongside the game with a nicer interface for watching jev change parameters.
+- **Nemesis.bat** (repo root, double-clickable): default mode starts the hostile game + `python -m nemesis.dashboard --live` (minimized) + opens the browser at :8787. Modes: `gameonly` / `normal` (ally+monsters) / `agent` (game + RL agent, dashboard comes with it — :31666 is single-client) / `dashboard` (replay files) / `reset` [`all`] / `kill` / `help`. Exe + python presence checks built in.
+- **Desktop shortcut**: `tools/make_shortcut.ps1` (run once) created `Project Nemesis.lnk` on the desktop (doom exe as icon, minimized launcher window). Re-run it any time to recreate.
+- **Dashboard v2 UI**: new **weight-drift chart** — one glowing line per tactic order, mean across nemesis rows, straight from the 1 Hz weight history with a dashed 1.0-neutral baseline and a "biggest movers" readout (this is the literal watch-the-parameters-move view); new **skill-over-time** step chart with level gridlines; weapon-bias panel now highlighted per key; per-order color legend chips shared across charts; heatmap scrolls horizontally instead of overflowing.
+- **Dashboard `--live` mode**: connects to the engine as the ONE client (observe-only, never sends orders/spawns — a `_LiveShim` feeds LiveState without an agent) so the dashboard runs alongside a plain game session. Exclusive with the agent by design; the bat's `agent` mode does not use --live.
+- Bug found in smoke test: `live_loop` originally took the dashboard port for the engine link (printed "watching the engine on :8787") — fixed to always use DIRECTOR_PORT; re-verified live (real tics, hp, history rows with full weight tables).
+- Verified: launcher `gameonly` boots the game (listener up on :31666), `--live` serves state+history, selftest + phase2 PASS after all edits.
+- Note: the bat writes no logs; if the dashboard fails to appear, run `python -m nemesis.dashboard --live` in a visible window to see the error (usually python missing from PATH).

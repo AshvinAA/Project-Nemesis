@@ -4,13 +4,18 @@ Zero dependencies: stdlib http.server + one embedded HTML page (dark theme,
 vanilla JS).  Endpoints:
     /         -> the console
     /state    -> live snapshot (same JSON the agent writes to live_state.json)
-    /history  -> tail of the 1 Hz history rows (sparkline fuel)
+    /history  -> tail of the 1 Hz history rows (sparkline + drift fuel)
 
-Runs two ways:
+Runs three ways:
   * wired into the agent  — rl_agent.run() starts it with the in-RAM
     LiveState, so it always serves the freshest snapshot;
-  * standalone            — `python -m nemesis.dashboard` reads the files off
-    disk (useful to inspect a past session while the agent is down).
+  * standalone (files)    — `python -m nemesis.dashboard` reads the files off
+    disk (inspect a past session while the agent is down);
+  * standalone (--live)   — `python -m nemesis.dashboard --live` CONNECTS to
+    the engine itself (observe-only, never sends orders) and drives the
+    snapshot live, so the dashboard runs alongside a plain game session with
+    no agent.  The engine accepts exactly ONE client: use --live only when
+    the agent is NOT running.
 """
 
 from __future__ import annotations
@@ -18,15 +23,23 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import config
 
 HISTORY_TAIL = 900  # rows sent to the UI (~15 min at 1 Hz)
 
-# The 7-order vocabulary (p_nemesis.c NEM_OrderIndex) — the heatmap columns.
+# The 8-order vocabulary (p_nemesis.c NEM_OrderIndex) — heatmap columns.
 ORDER_KEYS = ["chase", "hold", "fallback", "flank_left", "flank_right",
               "ambush", "focus_fire", "use_door"]
+
+# One color per order, shared by the heatmap accents and the drift chart.
+ORDER_COLORS = {
+    "chase": "#22d3ee", "hold": "#34d399", "fallback": "#f87171",
+    "flank_left": "#fbbf24", "flank_right": "#fb923c", "ambush": "#a78bfa",
+    "focus_fire": "#f472b6", "use_door": "#94a3b8",
+}
 
 _PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -42,7 +55,8 @@ _PAGE = r"""<!doctype html>
 body{background:radial-gradient(1200px 600px at 70% -10%,#0d1a2e 0%,var(--bg) 60%);
   color:var(--txt);font-family:var(--mono);min-height:100vh;padding:18px}
 a{color:var(--cy)}
-h1{font-size:15px;letter-spacing:3px;color:var(--cy);text-transform:uppercase}
+h1{font-size:15px;letter-spacing:3px;color:var(--cy);text-transform:uppercase;
+  text-shadow:0 0 18px #22d3ee44}
 h1 .sub{color:var(--dim);letter-spacing:1px;text-transform:none;font-size:11px}
 .wrap{max-width:1180px;margin:0 auto}
 .bar{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
@@ -51,7 +65,8 @@ h1 .sub{color:var(--dim);letter-spacing:1px;text-transform:none;font-size:11px}
   border:1px solid var(--line);border-radius:10px;padding:12px;position:relative;
   box-shadow:0 0 0 1px #000 inset,0 8px 24px #0008}
 .panel h2{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;
-  margin-bottom:10px}
+  margin-bottom:10px;display:flex;justify-content:space-between}
+.panel h2 .r{color:#31415e;letter-spacing:0;text-transform:none}
 .c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}
 .c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
 .big{font-size:30px;font-weight:700;color:#eaf4ff;line-height:1.1}
@@ -72,20 +87,23 @@ h1 .sub{color:var(--dim);letter-spacing:1px;text-transform:none;font-size:11px}
 .mlabels span{flex:1;text-align:center;font-size:9px;letter-spacing:1px;color:var(--dim)}
 .mlabels span.cur{color:var(--cy);text-shadow:0 0 8px #22d3ee88}
 /* heatmap */
-table.heat{border-collapse:separate;border-spacing:4px;width:100%}
+table.heat{border-collapse:separate;border-spacing:4px;width:100%;display:block;overflow-x:auto}
 table.heat th{font-size:9px;color:var(--dim);letter-spacing:1px;padding:2px 4px;text-align:center}
 table.heat td.type{font-size:11px;color:var(--txt);text-align:left;white-space:nowrap;padding-right:8px}
 table.heat td.cell{min-width:64px;height:30px;border-radius:5px;text-align:center;
   font-size:11px;color:#eaf4ff;border:1px solid #0006;text-shadow:0 1px 2px #000c}
 table.heat td.cell.na{background:#0a101c;color:#31415e;border-style:dashed}
-.legend{display:flex;gap:14px;margin-top:8px;font-size:9px;color:var(--dim);align-items:center}
+.legend{display:flex;gap:14px;margin-top:8px;font-size:9px;color:var(--dim);align-items:center;flex-wrap:wrap}
 .chip{width:14px;height:10px;border-radius:3px;display:inline-block;vertical-align:middle}
 .deaths{font-size:11px;color:var(--dim)}
 .deaths b{color:var(--am);font-size:16px}
-/* sparklines */
+/* charts */
 .spk{width:100%;height:64px;display:block}
+.spk.tall{height:150px}
 .spkrow{margin-bottom:8px}
 .spkhead{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);margin-bottom:2px}
+.leg{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:9px;color:var(--dim)}
+.leg .chip{width:10px;height:10px}
 /* ticker */
 ul.tick{list-style:none;max-height:230px;overflow:hidden}
 ul.tick li{font-size:10.5px;padding:4px 6px;border-bottom:1px dashed #16223a;white-space:nowrap;
@@ -98,6 +116,8 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
 .ok .pulse{background:var(--gr);box-shadow:0 0 10px var(--gr)}
 .status{font-size:11px;color:var(--dim)}
 .foot{margin-top:12px;font-size:10px;color:#31415e;text-align:center;letter-spacing:1px}
+.wbline{font-size:11px;color:var(--dim);white-space:pre-line;line-height:1.7}
+.wbline b{color:var(--am)}
 </style></head><body><div class="wrap">
 <div class="bar">
   <h1>Nemesis <span class="sub">// weight-evolution console — watching the jev learn</span></h1>
@@ -113,7 +133,7 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
   <div class="panel c3"><h2>Player HP</h2><div class="big" id="hp">–</div>
     <div style="font-size:10px;color:var(--dim);margin-top:4px" id="act">act: –</div></div>
 
-  <div class="panel c6"><h2>Hostile-buddy skill (curriculum)</h2>
+  <div class="panel c6"><h2>Hostile-buddy skill (curriculum) <span class="r" id="skpush"></span></h2>
     <div class="big" id="skname" style="font-size:24px">–</div>
     <div class="meter" id="meter"></div>
     <div class="mlabels" id="mlabels"></div>
@@ -129,7 +149,14 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
     </div>
   </div>
 
-  <div class="panel c8"><h2>Telemetry — last 15 min</h2>
+  <div class="panel c8"><h2>Weight drift — how jev keeps retuning the tactics
+      <span class="r" id="wdrift_r"></span></h2>
+    <canvas class="spk tall" id="spk_w"></canvas>
+    <div class="leg" id="wleg"></div>
+  </div>
+  <div class="panel c4"><h2>Event ticker</h2><ul class="tick" id="tick"></ul></div>
+
+  <div class="panel c6"><h2>Telemetry — last 15 min</h2>
     <div class="spkrow"><div class="spkhead"><span>epsilon</span><span id="spk_eps_v"></span></div>
       <canvas class="spk" id="spk_eps"></canvas></div>
     <div class="spkrow"><div class="spkhead"><span>episode terminal reward</span><span id="spk_r_v"></span></div>
@@ -137,14 +164,18 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
     <div class="spkrow"><div class="spkhead"><span>survival seconds / player hp</span><span id="spk_surv_v"></span></div>
       <canvas class="spk" id="spk_surv"></canvas></div>
   </div>
-  <div class="panel c4"><h2>Event ticker</h2><ul class="tick" id="tick"></ul></div>
-  <div class="panel c12"><h2>Weapon bias per type</h2><div id="wbias" style="font-size:11px;color:var(--dim)">no learned bias yet — the nemesis has to die (or kill) first</div></div>
+  <div class="panel c6"><h2>Skill over time <span class="r">curriculum level, 1 Hz</span></h2>
+    <canvas class="spk" id="spk_sk" style="height:80px"></canvas>
+    <h2 style="margin-top:12px">Weapon bias per type</h2>
+    <div class="wbline" id="wbias">no learned bias yet — the nemesis has to die (or kill) first</div>
+  </div>
   <div class="foot">PROJECT NEMESIS // phase 9 // no stat buffs — the weights are the whole story</div>
 </div>
 <script>
 "use strict";
 const ORDERS=__ORDERS__;
 const LEVELS=__LEVELS__;
+const OCOLORS=__OCOLORS__;
 let hist=[];
 
 const $=id=>document.getElementById(id);
@@ -171,13 +202,13 @@ function drawHeat(rows){
     }
     body+=`<td style="text-align:center;color:var(--am)">${r.deaths??0}</td></tr>`;
     const wb=r.weapon_bias||{};
-    const wbs=Object.entries(wb).map(([k,v])=>`${k}:${v>0?'+':''}${v}`).join("  ");
+    const wbs=Object.entries(wb).map(([k,v])=>`<b>${k}</b>:${v>0?'+':''}${v}`).join("  ");
     if(wbs)dsum+=`${esc(r.type)}  ${wbs}\n`;
   }
   t.innerHTML=head+body;
   $("deaths").textContent=rows&&rows.length?("total deaths: "+rows.reduce((a,r)=>a+(r.deaths||0),0)):"no rows yet";
   const wbEl=$("wbias");
-  if(dsum){wbEl.textContent=dsum.trim();wbEl.style.whiteSpace="pre";}
+  if(dsum){wbEl.innerHTML=dsum.trim();}
   else{wbEl.textContent="no learned bias yet — the nemesis has to die (or kill) first";}
 }
 function drawSkill(sk){
@@ -207,10 +238,94 @@ function spark(canvas,vals,color,now){
   });
   ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.shadowColor=color;ctx.shadowBlur=6;
   ctx.stroke();ctx.shadowBlur=0;
-  // last point glow
   const lx=(w-4),ly=h-6-((vals[vals.length-1]-mn)/sp)*(h-14);
   ctx.fillStyle=color;ctx.beginPath();ctx.arc(lx-4,ly,2.5,0,7);ctx.fill();
   if(now!=null)$(now).textContent=`min ${fmt(mn,2)} · max ${fmt(mx,2)} · now ${fmt(vals[vals.length-1],2)}`;
+}
+// The star of the show: one line per tactic order, mean across nemesis types,
+// straight from the 1 Hz weight history — you literally watch the numbers move.
+function drawWeightDrift(rows){
+  const c=$("spk_w");if(!c)return;
+  const w=c.clientWidth||600,h=c.height,ctx=c.getContext("2d");
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle="#16223a";ctx.strokeRect(0.5,0.5,w-1,h-1);
+  // series: order -> [mean tactic weight per row that has any]
+  const series={};ORDERS.forEach(o=>series[o]=[]);
+  let count=0;
+  for(const r of rows){
+    const wt=r.wt||{};
+    const types=Object.values(wt).filter(t=>t&&t.tactics&&Object.keys(t.tactics).length);
+    if(!types.length)continue;
+    count++;
+    for(const o of ORDERS){
+      let s=0,n=0;
+      for(const t of types){const v=t.tactics[o];if(v!=null){s+=v;n++;}}
+      series[o].push(n?s/n:null);
+    }
+  }
+  if(!count){ctx.fillStyle="#31415e";ctx.font="10px monospace";
+    ctx.fillText("no weight changes yet — fight something (deaths/kill events move the weights)",8,h/2);
+    $("wdrift_r").textContent="";return;}
+  // baseline 1.0
+  let mn=0.9,mx=1.1;
+  for(const o of ORDERS)for(const v of series[o])if(v!=null){mn=Math.min(mn,v);mx=Math.max(mx,v);}
+  const pad=0.05;mn=Math.max(0,mn-pad);mx=Math.min(2.2,mx+pad);
+  const Y=v=>h-10-((v-mn)/(mx-mn||1))*(h-24);
+  const X=i=>(i/(count-1||1))*(w-16)+8;
+  ctx.setLineDash([3,4]);ctx.strokeStyle="#31415e";
+  ctx.beginPath();ctx.moveTo(6,Y(1.0));ctx.lineTo(w-6,Y(1.0));ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle="#31415e";ctx.font="9px monospace";
+  ctx.fillText("1.0 neutral",w-64,Y(1.0)-4);
+  const leg=$("wleg");
+  if(!leg.children.length){
+    leg.innerHTML=ORDERS.map(o=>`<span><span class="chip" style="background:${OCOLORS[o]}"></span>${o}</span>`).join("");
+  }
+  for(const o of ORDERS){
+    const vals=series[o];if(!vals.some(v=>v!=null))continue;
+    ctx.beginPath();let started=false;
+    vals.forEach((v,i)=>{
+      if(v==null)return;
+      const x=X(i),y=Y(v);
+      started?ctx.lineTo(x,y):(ctx.moveTo(x,y),started=true);
+    });
+    ctx.strokeStyle=OCOLORS[o];ctx.lineWidth=1.6;
+    ctx.shadowColor=OCOLORS[o];ctx.shadowBlur=5;
+    ctx.stroke();ctx.shadowBlur=0;
+  }
+  const last={};
+  for(const o of ORDERS){const v=[...series[o]].reverse().find(v=>v!=null);if(v!=null)last[o]=v;}
+  const movers=ORDERS.filter(o=>last[o]!=null&&Math.abs(last[o]-1)>0.02)
+    .sort((a,b)=>Math.abs(last[b]-1)-Math.abs(last[a]-1)).slice(0,3)
+    .map(o=>`${o} ${last[o].toFixed(2)}`);
+  $("wdrift_r").textContent=movers.length?("biggest movers: "+movers.join(" · ")):
+    "hovering at neutral";
+}
+function drawSkillHist(rows){
+  const c=$("spk_sk");if(!c)return;
+  const w=c.clientWidth||400,h=c.height,ctx=c.getContext("2d");
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle="#16223a";ctx.strokeRect(0.5,0.5,w-1,h-1);
+  const vals=rows.map(r=>r.skill).filter(v=>typeof v==="number");
+  if(!vals.length){ctx.fillStyle="#31415e";ctx.font="10px monospace";
+    ctx.fillText("no data yet",8,h/2);return;}
+  const Y=v=>h-8-(v/(LEVELS.length-1))*(h-18);
+  const X=i=>(i/(vals.length-1||1))*(w-12)+6;
+  // step line, colored by current level
+  ctx.beginPath();
+  vals.forEach((v,i)=>{
+    const x=X(i),y=Y(v);
+    if(!i)ctx.moveTo(x,y);
+    else{ctx.lineTo(X(i),Y(vals[i-1]));ctx.lineTo(x,y);}
+  });
+  const cur=vals[vals.length-1];
+  ctx.strokeStyle=OCOLORS.chase;ctx.lineWidth=1.6;
+  ctx.shadowColor=OCOLORS.chase;ctx.shadowBlur=5;ctx.stroke();ctx.shadowBlur=0;
+  ctx.fillStyle="#5c6f8f";ctx.font="9px monospace";
+  for(let l=0;l<LEVELS.length;l++){
+    ctx.fillText(LEVELS[l],8,Y(l)-2);
+    ctx.fillStyle="#16223a";ctx.fillRect(58,Y(l),w-64,1);ctx.fillStyle="#5c6f8f";
+  }
+  $("spk_sk").title=`now: skill ${cur} (${LEVELS[cur]||"?"})`;
 }
 function classify(t){
   const s=t.toLowerCase();
@@ -223,13 +338,12 @@ function classify(t){
 function render(s){
   if(!s||!s.ts){$("status").innerHTML='<span class="pulse"></span>waiting for first snapshot…';return;}
   $("status").className="status ok";
-  $("status").innerHTML='<span class="pulse"></span>live · tic '+s.tic;
+  $("status").innerHTML='<span class="pulse"></span>live · tic '+s.tic+' · '+new Date().toLocaleTimeString();
   $("ep").textContent=s.episode_label;
   $("epsub").textContent=`completed episodes: ${s.episode} · alive: ${s.alive?"yes":"no"}`;
   $("eps").textContent=fmt(s.epsilon,3);
   const e=s.epsilon;
   $("epssub").textContent=e>0.5?"pure exploration (random)":e>0.15?"still curious":"exploiting what it learned";
-  $("eps").className="big "+(e>0.5?"":e>0.15?"":"");
   $("surv").innerHTML=fmt(s.surv_avg,1)+'<span class="u"> s</span>';
   $("rsub").textContent=`last terminal: ${s.last_terminal_r>=0?"+":""}${fmt(s.last_terminal_r,1)}`;
   $("rsub").style.color=s.last_terminal_r>=0?"var(--gr)":"var(--rd)";
@@ -237,6 +351,7 @@ function render(s){
   $("hp").className="big "+((s.player_hp??100)>60?"ok":(s.player_hp??100)>25?"warn":"bad");
   $("act").textContent="act: "+(s.last_action??"–");
   if(typeof s.buddy_skill==="number")drawSkill(s.buddy_skill);
+  $("skpush").textContent=s.pushes?`${s.pushes} curriculum pushes`:"";
   drawHeat(s.rows||[]);
   const tick=$("tick");
   const evs=[...(s.agent_events||[]).map(x=>[x.ts,x.text]),
@@ -250,6 +365,8 @@ function renderHist(rows){
   spark("spk_eps",hist.map(r=>r.eps),"#22d3ee","spk_eps_v");
   spark("spk_r",hist.map(r=>r.r),"#34d399","spk_r_v");
   spark("spk_surv",hist.map(r=>r.surv??r.hp),"#fbbf24","spk_surv_v");
+  drawWeightDrift(hist);
+  drawSkillHist(hist);
 }
 async function poll(){
   try{
@@ -302,7 +419,8 @@ class DashboardState:
 def make_handler(state: DashboardState):
     page = (_PAGE
             .replace("__ORDERS__", json.dumps(ORDER_KEYS))
-            .replace("__LEVELS__", json.dumps(list(config.SKILL_LEVELS))))
+            .replace("__LEVELS__", json.dumps(list(config.SKILL_LEVELS)))
+            .replace("__OCOLORS__", json.dumps(ORDER_COLORS)))
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes, ctype: str) -> None:
@@ -339,18 +457,87 @@ def start(live=None, port: int = 0):
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
 
 
+class _LiveShim:
+    """Observe-only stand-in for LiveLearner so --live can feed LiveState
+    without an agent (no orders, no spawns, no Q updates — just watching)."""
+
+    class _Q:
+        episode = 0
+
+        @staticmethod
+        def epsilon():
+            return config.EPSILON_START
+
+    def __init__(self) -> None:
+        self.q = self._Q()
+        self.epsilon_override = None
+        self.alive = False
+        self.rewards_log: list[float] = []
+        self.prev_hp = None
+        self.last_action_name = None
+
+    def episode_label(self) -> int:
+        return self.q.episode
+
+    def _surv_avg(self) -> float:
+        return 0.0
+
+
+def live_loop(live, engine_port=None, max_seconds: float | None = None) -> None:
+    """--live: connect to the engine as the ONE client, poll observe, feed
+    the dashboard.  Watch-only: nothing is ever sent but `observe`."""
+    from .engine import DirectorLink
+    from .curriculum import SkillCurriculum
+
+    shim = _LiveShim()
+    curriculum = SkillCurriculum(DirectorLink(port=engine_port or config.DIRECTOR_PORT))
+    link = curriculum.link
+    deadline = time.monotonic() + max_seconds if max_seconds else None
+    print(f"[dashboard] live mode: watching the engine on :{link.port} "
+          "(observe-only; the agent must NOT be running)")
+    while deadline is None or time.monotonic() < deadline:
+        if not link.ensure_connected():
+            time.sleep(config.RECONNECT_DELAY)
+            continue
+        obs = link.observe()
+        if obs is None or obs.get("nolevel"):
+            time.sleep(config.POLL_PERIOD)
+            continue
+        curriculum.reconcile(obs.get("nemesis", {}).get("buddy_skill"))
+        live.update(shim, obs, curriculum)
+        time.sleep(config.POLL_PERIOD)
+
+
 def main() -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="Nemesis dashboard (standalone: reads files from disk)")
+    ap = argparse.ArgumentParser(
+        description="Nemesis dashboard (standalone: reads files, or --live to watch the engine)")
     ap.add_argument("--port", type=int, default=config.DASHBOARD_PORT)
+    ap.add_argument("--live", action="store_true",
+                    help="connect to the engine and stream live snapshots "
+                         "(observe-only; exclusive with the agent)")
+    ap.add_argument("--max-seconds", type=float, default=None)
     args = ap.parse_args()
+
+    if args.live:
+        from .livestate import LiveState
+        live = LiveState()
+        httpd, url = start(live=live, port=args.port)
+        print(f"[dashboard] serving {url}")
+        try:
+            live_loop(live, max_seconds=args.max_seconds)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            httpd.shutdown()
+        return 0
+
     httpd, url = start(live=None, port=args.port)
     print(f"[dashboard] serving {url}  (reads {config.LIVE_STATE_PATH} + history)")
     print("[dashboard] Ctrl+C to stop")
     try:
         while True:
-            import time as _t
-            _t.sleep(3600)
+            time.sleep(3600)
     except KeyboardInterrupt:
         httpd.shutdown()
     return 0
