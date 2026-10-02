@@ -132,6 +132,37 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
 ul.tick li.demote{color:var(--am)}
 .seg.cur{animation:segp 1.6s ease-in-out infinite}
 @keyframes segp{0%,100%{box-shadow:0 0 6px #22d3ee44}50%{box-shadow:0 0 18px #22d3eecc}}
+/* Phase 9.16: hero ladder stepper, scoreboard, rank-up flash */
+.ladder{display:flex;align-items:center;margin:14px 2px 2px}
+.lnode{display:flex;flex-direction:column;align-items:center;gap:5px;flex:0 0 auto;width:88px}
+.ldot{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);background:#0a101c;
+  display:flex;align-items:center;justify-content:center;font-size:11px;color:#31415e;font-weight:700}
+.lnode.done .ldot{border-color:var(--cy);color:var(--cy);box-shadow:0 0 10px #22d3ee44}
+.lnode.cur .ldot{border-color:var(--cy);background:linear-gradient(180deg,#0ea5b7,#22d3ee);
+  color:#03202b;animation:dotp 1.4s ease-in-out infinite}
+.lname{font-size:9px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;text-align:center}
+.lnode.cur .lname{color:var(--cy);text-shadow:0 0 8px #22d3ee88}
+.lnode.done .lname{color:#8fd8e8}
+.lbar{flex:1;height:2px;background:var(--line);margin:0 -8px 18px;position:relative;overflow:hidden}
+.lbar.done::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,#0ea5b7,#22d3ee);animation:fillx .8s ease}
+@keyframes dotp{0%,100%{box-shadow:0 0 6px #22d3ee55}50%{box-shadow:0 0 24px #22d3eedd}}
+@keyframes fillx{from{width:0}to{width:100%}}
+.sb{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sb .tile{background:#0a101c;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.sb .tile .v{font-size:20px;font-weight:700;color:#eaf4ff;line-height:1.1}
+.sb .tile .l{font-size:9px;color:var(--dim);letter-spacing:.5px;margin-top:3px;line-height:1.4}
+.sb .tile.hot{border-color:#fbbf2455}.sb .tile.hot .v{color:var(--am)}
+.flashscreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;opacity:0;z-index:50}
+.flashscreen.go{animation:bigflash 1.9s ease}
+.flashscreen .txt{font-size:46px;letter-spacing:8px;font-weight:700;color:var(--cy);
+  text-shadow:0 0 30px #22d3ee,0 0 90px #22d3ee88}
+.flashscreen .sub{font-size:16px;letter-spacing:3px;color:#8fd8e8;text-align:center;margin-top:8px}
+@keyframes bigflash{0%{opacity:0}12%{opacity:1}70%{opacity:.85}100%{opacity:0}}
+#hero.flash{animation:heroflash 1.9s ease}
+@keyframes heroflash{0%,100%{box-shadow:0 0 0 1px #000 inset,0 8px 24px #0008}
+  30%{box-shadow:0 0 0 2px #22d3ee inset,0 0 70px #22d3ee66}}
 </style></head><body><div class="wrap">
 <div class="bar">
   <h1>Nemesis <span class="sub">// weight-evolution console — watching the jev learn</span></h1>
@@ -147,20 +178,18 @@ ul.tick li.demote{color:var(--am)}
   <div class="panel c3" title="Your current health, and the weapon you are holding. In hostile training mode you spawn with a shotgun."><h2>Player HP</h2><div class="big" id="hp">–</div>
     <div style="font-size:10px;color:var(--dim);margin-top:4px" id="act">act: –</div></div>
 
-  <div class="panel c12" id="explainer-panel" title="One sentence a normal person can read: what jev is doing this second, what rank he is, and what will move him up or down the ladder.">
-    <h2>What is jev doing right now?</h2>
+  <div class="panel c12" id="hero" title="One sentence a normal person can read: what jev is doing this second, what rank he is, and what will move him up or down the ladder.">
+    <h2>What is jev doing right now? <span class="r" id="skpush"></span></h2>
     <div class="explain-big" id="explain">waiting for the engine…</div>
-    <div class="explain-sub" id="explain2">the training duel: jev hunts you, you rough him up — every 100 damage he absorbs promotes him one rank; if he kills you, he eases off one rank</div>
+    <div class="ladder" id="ladder"></div>
+    <div class="explain-sub" id="explain2" style="margin-top:10px">the training duel: jev hunts you, you rough him up — every 100 damage he absorbs promotes him one rank; if he kills you, he eases off one rank</div>
     <div class="xpwrap" title="XP = the damage YOU have dealt jev since his last rank-up. Fill the bar and he promotes."><div class="xpbar" id="xpbar"></div><span class="xptext" id="xptext"></span></div>
   </div>
 
-  <div class="panel c6" title="jev's rank ladder: rookie → amateur → semi-pro → professional → legend. It climbs when he absorbs ~100 of your damage per rank, drops when he kills you. The engine remembers the rank across sessions."><h2>jev rank (the ladder) <span class="r" id="skpush"></span></h2>
-    <div class="big" id="skname" style="font-size:24px">–</div>
-    <div class="meter" id="meter"></div>
-    <div class="mlabels" id="mlabels"></div>
-    <div style="font-size:10px;color:var(--dim);margin-top:8px" id="sksub">+1 rank per 100 damage you deal him · −1 when he kills you · rank persists between runs</div>
+  <div class="panel c4" title="This session's scoreboard: what you and jev have done to each other since the dashboard connected."><h2>Scoreboard <span class="r" id="sbtime"></span></h2>
+    <div class="sb" id="sb"><div class="tile"><div class="v">–</div><div class="l">waiting for the engine…</div></div></div>
   </div>
-  <div class="panel c6" title="What jev's squad has learned, per monster type: green = the squad favors that tactic (it worked), red = it avoids that tactic (it got monsters killed). Numbers are multipliers on the tactic's base chance."><h2>Learned weight heatmap — nemesis rows</h2>
+  <div class="panel c8" title="What jev's squad has learned, per monster type: green = the squad favors that tactic (it worked), red = it avoids that tactic (it got monsters killed). Numbers are multipliers on the tactic's base chance."><h2>Learned weight heatmap — nemesis rows</h2>
     <table class="heat" id="heat"></table>
     <div class="legend">
       <span><span class="chip" style="background:#f87171"></span> punished (&lt;1.0)</span>
@@ -244,20 +273,58 @@ function drawHeat(rows){
   if(dsum){wbEl.innerHTML=dsum.trim();}
   else{wbEl.textContent="no learned bias yet — the nemesis has to die (or kill) first";}
 }
-function drawSkill(sk){
-  const m=$("meter"),lb=$("mlabels");
-  if(m.children.length!==LEVELS.length){
-    m.innerHTML=LEVELS.map(()=>`<div class="seg"></div>`).join("");
-    lb.innerHTML=LEVELS.map(n=>`<span>${n}</span>`).join("");
+function drawSkill(sk,prev){
+  // Phase 9.16: hero ladder stepper (rookie -> legend) with connecting bars.
+  const L=$("ladder");
+  if(L.children.length!==LEVELS.length*2-1){
+    L.innerHTML=LEVELS.map((n,i)=>
+      (i?`<div class="lbar" id="lb${i}"></div>`:"")+
+      `<div class="lnode" id="ln${i}"><div class="ldot">${i+1}</div><div class="lname">${n}</div></div>`).join("");
   }
-  [...m.children].forEach((el,i)=>{
-    el.classList.toggle("on",i<=sk);
+  LEVELS.forEach((n,i)=>{
+    const el=$("ln"+i);
+    el.classList.toggle("done",i<sk);
     el.classList.toggle("cur",i===sk);
   });
-  [...lb.children].forEach((el,i)=>el.classList.toggle("cur",i===sk));
-  $("skname").textContent=LEVELS[sk]||("level "+sk);
+  for(let i=1;i<LEVELS.length;i++)$("lb"+i).classList.toggle("done",i<=sk);
 }
-function spark(canvas,vals,color,now){
+function drawScoreboard(st,secs){
+  const el=$("sb");
+  const t=(x)=>x==null?"–":x;
+  if(!el.dataset.on){
+    el.dataset.on=1;
+    el.innerHTML=`
+      <div class="tile hot" title="Monsters jev's squad lost this session (the squad dies, jev adapts)."><div class="v" id="sb_kills">0</div><div class="l">squad deaths</div></div>
+      <div class="tile" title="Shots you landed on jev's squad."><div class="v" id="sb_hits">0</div><div class="l">hits you landed</div></div>
+      <div class="tile" title="Total damage you dealt jev's squad this session."><div class="v" id="sb_dmg">0</div><div class="l">damage dealt</div></div>
+      <div class="tile hot" title="Times jev climbed a rank this session."><div class="v" id="sb_rankups">0</div><div class="l">rank-ups</div></div>
+      <div class="tile" title="Times jev eased off because he killed you."><div class="v" id="sb_eased">0</div><div class="l">eased off</div></div>
+      <div class="tile" title="Times you died to jev this session."><div class="v" id="sb_pdeaths">0</div><div class="l">your deaths</div></div>`;
+  }
+  if(!st)return;
+  $("sb_kills").textContent=t(st.kills);$("sb_hits").textContent=t(st.hits);
+  $("sb_dmg").textContent=t(st.dmg);$("sb_rankups").textContent=t(st.rankups);
+  $("sb_eased").textContent=t(st.eased);$("sb_pdeaths").textContent=t(st.pdeaths);
+  const m=Math.floor((secs||0)/60),s=Math.round((secs||0)%60);
+  $("sbtime").textContent=`session ${m}:${String(s).padStart(2,"0")}`;
+}
+// The rank-up flash: full-screen bloom + big words, once per promotion.
+let flashUntil=0,flashRank=-1;
+function rankFlash(rank,name){
+  const now=Date.now();
+  if(now<flashUntil||rank===flashRank)return;
+  flashRank=rank;flashUntil=now+2100;
+  let ov=$("flash");
+  if(!ov){
+    ov=document.createElement("div");ov.id="flash";ov.className="flashscreen";
+    ov.innerHTML=`<div><div class="txt">RANK UP</div><div class="sub" id="flashsub"></div></div>`;
+    document.body.appendChild(ov);
+  }
+  $("flashsub").textContent=`jev is now ${name.toUpperCase()}`;
+  ov.classList.remove("go");void ov.offsetWidth;ov.classList.add("go");
+  const hero=$("hero");hero.classList.remove("flash");void hero.offsetWidth;hero.classList.add("flash");
+}
+function spark(canvas,vals,color,now,fill){
   const c=$(canvas);if(!c)return;
   const w=c.clientWidth||400,h=c.height;
   const ctx=c.getContext("2d");
@@ -272,6 +339,20 @@ function spark(canvas,vals,color,now){
     const y=h-6-((v-mn)/sp)*(h-14);
     i?ctx.lineTo(x,y):ctx.moveTo(x,y);
   });
+  if(fill){
+    ctx.save();
+    const lx=(vals.length-1)/(vals.length-1||1)*(w-8)+4;
+    ctx.lineTo(lx,h-6);ctx.lineTo(4,h-6);ctx.closePath();
+    const gr=ctx.createLinearGradient(0,0,0,h);
+    gr.addColorStop(0,color+"55");gr.addColorStop(1,color+"00");
+    ctx.fillStyle=gr;ctx.fill();ctx.restore();
+    ctx.beginPath();
+    vals.forEach((v,i)=>{
+      const x=(i/(vals.length-1||1))*(w-8)+4;
+      const y=h-6-((v-mn)/sp)*(h-14);
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    });
+  }
   ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.shadowColor=color;ctx.shadowBlur=6;
   ctx.stroke();ctx.shadowBlur=0;
   const lx=(w-4),ly=h-6-((vals[vals.length-1]-mn)/sp)*(h-14);
@@ -442,6 +523,8 @@ function render(s){
   if(typeof s.buddy_skill==="number")drawSkill(s.buddy_skill);
   $("skpush").textContent=s.pushes?`${s.pushes} curriculum pushes`:"";
   explain(s);
+  drawScoreboard(s.stats,s.session_secs);
+  scanRankups(s.events);
   drawHeat(s.rows||[]);
   const tick=$("tick");
   const evs=[...(s.agent_events||[]).map(x=>[x.ts,x.text]),
@@ -452,9 +535,9 @@ function render(s){
 }
 function renderHist(rows){
   hist=rows||[];
-  spark("spk_eps",hist.map(r=>r.eps),"#22d3ee","spk_eps_v");
-  spark("spk_r",hist.map(r=>r.r),"#34d399","spk_r_v");
-  spark("spk_surv",hist.map(r=>r.surv??r.hp),"#fbbf24","spk_surv_v");
+  spark("spk_eps",hist.map(r=>r.eps),"#22d3ee","spk_eps_v",true);
+  spark("spk_r",hist.map(r=>r.r),"#34d399","spk_r_v",true);
+  spark("spk_surv",hist.map(r=>r.surv??r.hp),"#fbbf24","spk_surv_v",true);
   drawWeightDrift(hist);
   drawSkillHist(hist);
 }
@@ -468,7 +551,20 @@ async function pollHist(){
   try{const h=await (await fetch("/history")).json();renderHist(h.rows||[]);}
   catch(e){}
 }
-poll();pollHist();
+// Rank-up detection from the event ring (fires the flash + why-line).
+function scanRankups(events){
+  for(const ev of (events||[])){
+    const s=String(ev);
+    const m=/rankup:buddy:(\\d+)/.exec(s);
+    if(m){
+      const l=parseInt(m[1],10);
+      rankFlash(l,LEVELS[l]||("level "+l));
+    }
+    // An ease-off resets the dedupe so re-earning the same rank flashes again.
+    if(/eased:buddy:/.test(s))flashRank=-1;
+  }
+}
+poll();pollHist();scanRankups([]);
 setInterval(poll,250);setInterval(pollHist,1000);
 </script></body></html>"""
 

@@ -866,6 +866,54 @@ void P_AICoop_Callout (const char* prefix, int n)
     AICoop_Callout (prefix, n);
 }
 
+// ---- Phase 9.15: rank-up drama (pure display, zero gameplay effect) -------
+
+// The rank-up MOMENT: a ring of teleport fog bursts around the buddy (it
+// visibly "levels up" on screen), a teleport-deep sound, a taunt callout on
+// its own voice, an in-game screen message and a console line.  Called from
+// NEM_BuddyLesson on every promotion (demotes stay quiet -- the console
+// ease-off line is all they get).
+void P_AICoop_RankMoment (int level)
+{
+    static int tidx;
+    mobj_t* mo = AICoop_Mo ();
+    if (mo)
+    {
+	int i;
+	// 4 fog bursts around the buddy (N/E/S/W, 56u out) + one above it.
+	// Index arithmetic (i*64 on the 256-entry finetables) = 90-degree steps.
+	for (i = 0 ; i < 4 ; i++)
+	{
+	    int ti = (i * 64) & 255;
+	    P_SpawnMobj (mo->x + FixedMul (56*FRACUNIT, finecosine[ti]),
+			 mo->y + FixedMul (56*FRACUNIT, finesine[ti]),
+			 mo->subsector->sector->floorheight, MT_TFOG);
+	}
+	P_SpawnMobj (mo->x, mo->y, mo->z + 40*FRACUNIT, MT_TFOG);
+	S_StartSound (mo, sfx_telept);
+    }
+    {
+	char buf[16];
+	snprintf (buf, sizeof(buf), "taunt:%d", tidx++ % 4);
+	AICoop_SayTagP (buf, VP_KILL);		// cuts through ambient chatter
+    }
+    C_Printf ("[buddy] >>> %s reached the rank of %s! <<<\n",
+	      companion_active ? "JEV" : "the buddy", P_AICoop_SkillName (level));
+    if (playeringame[consoleplayer])
+	players[consoleplayer].message = "JEV RANKED UP -- he is getting better.";
+}
+
+// The victory PAUSE: after the buddy downs the human it stands still for a
+// beat and taunts (gloating), then resumes.  Set from p_inter.c's kill block
+// right where the demote fires; consumed at the top of the LIVE BuildCmd path.
+static int victory_until;		// gametic until which the buddy gloats
+void P_AICoop_VictoryPause (void)
+{
+    if (!buddy_hostile) return;
+    victory_until = gametic + 3 * TICRATE / 2;	// ~1.5 s of gloating
+    AICoop_CalloutP ("taunt:", 4, VP_KILL);
+}
+
 // Duke-style per-monster kill quip: tag (+ variant count in *n) for a victim type.
 static const char* AICoop_KillTag (mobjtype_t t, int* n)
 {
@@ -4031,6 +4079,12 @@ void P_AICoop_BuildCmd (void)
     mo = bot->mo;
     hostile_was_dead = 0;	// Phase 8: standing -> the death latch is spent
     memset (cmd, 0, sizeof(*cmd));
+
+    // Phase 9.15: just downs the human -> stand still and gloat for a beat
+    // (the taunt voice already fired in P_AICoop_VictoryPause; this is the
+    // visible pause).  Zero stat effect -- it expires on its own.
+    if (buddy_hostile && gametic < victory_until)
+	return;
 
     // Position trace (ring, ~2 s) -- recorded before anything can move or recall it.
     vtrace_x[vtrace_head] = mo->x;

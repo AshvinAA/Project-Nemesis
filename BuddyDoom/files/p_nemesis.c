@@ -188,6 +188,8 @@ static void NEM_BuddyLesson (int delta)
 		delta > 0 ? "promoted" : "demoted", ns, P_AICoop_SkillName (ns));
 	C_Printf ("[buddy] %s %d/4 (%s)\n", delta > 0 ? "RANK UP ->" : "eased off ->",
 		  ns, P_AICoop_SkillName (ns));
+	if (delta > 0)
+	    P_AICoop_RankMoment (ns);		// Phase 9.15: fog ring + taunt + message
 	// Bridge/dashboard event (the RL agent's label parser ignores unknown
 	// kinds; the dashboard colors rankup/eased lines).
 	snprintf (label, sizeof(label), "%ld:%s:buddy:%d",

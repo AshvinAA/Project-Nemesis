@@ -213,6 +213,23 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       with 20 remainder banked, rankup event in the ring, `buddy skill=3` override, 250 xp overflow
       → legend clamp with capped pot, buddy kill → eased-off + respawn still armed. FULL PASS
       (2026-10-02, fresh `nemesis_memory.dat`).
+- [x] **9.15 Rank-up drama** (engine, pure display): every promotion fires `P_AICoop_RankMoment` —
+      a ring of 5 teleport-fog bursts around the buddy + `sfx_telept`, a rotated `taunt:0..3` voice
+      callout at VP_KILL priority, an in-game screen message ("JEV RANKED UP -- he is getting
+      better.") and a `>>> JEV reached the rank of X! <<<` console line. Plus `P_AICoop_VictoryPause`:
+      after downing the human the buddy stands still ~1.5 s and gloats (taunt voice) before
+      re-engaging — set from the p_inter.c kill block next to the demote. Zero gameplay/stat effect.
+      Live: all promotions/ease-offs in a full ladder run executed without a crash; taunt lumps are
+      pre-baked (taunt:0..3 in VOICE_MAP).
+- [x] **9.16 Dashboard v4**: hero explainer panel now carries a full ladder STEPPER (5 glowing nodes
+      rookie→legend with animated connecting bars, pulsing current node), a session SCOREBOARD
+      (squad deaths / hits landed / damage dealt / rank-ups / eased-off / your deaths + session
+      clock) fed by a new LiveState event-absorber (`_absorb_events`: ring-baseline semantics —
+      first sight of a NON-empty ring is backlog, an empty ring arms the counter at −1; replayed
+      seqs never double-count; player deaths from hp→0 edges), and a full-screen RANK-UP flash
+      (big "RANK UP — jev is now X" bloom, hero-panel glow, re-armable after an ease-off).
+      Sparklines got gradient area fills. Tests extended (UI contract + scoreboard counter
+      arithmetic + ring-replay tolerance).
 
 ## 10. Phase 7 — Demo video **[ ]**
 
@@ -239,6 +256,7 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
 | D9 | Build toolchain | Portable w64devkit (GCC 16.2) + CMake 3.31.6 in `tools/` on F: — no admin needed; C: is 99% full so VS BuildTools cannot install (0x80070070). `tools/build_buddydoom.bat` = one-command build | LOCKED |
 | D10 | Buddy auto-lesson scope | The shotgunguy-death promote NEVER fired (buddy is a bot player, not a row) — replaced in 9.12 by the XP ladder; kill-block demote now gated on the buddy actually being the killer | RESOLVED |
 | D11 | Ladder design (9.12) | XP = post-armor damage the HUMAN deals the buddy, 100/rank, pot persists, trainer `buddy skill=N` resets the pot, legend caps the pot at 99; buddy self-splash and monster damage don't count; demote only when the buddy kills the human | LOCKED |
+| D12 | Rank-up drama (9.15) | Fog ring + taunt + screen message + victory pause are DISPLAY-ONLY (no stat/stat-adjacent effect); taunt lumps pre-baked (taunt:0..3); demotes stay quiet | LOCKED |
 
 ## 13. Run cheat sheet (from HANDOFF.md — verified)
 
@@ -387,3 +405,13 @@ python tools/ladder_test.py
 - **9.13b Tests:** new `python -m nemesis.test_dashboard` → DASHBOARD PASS (endpoints vs a real LiveState incl. rank/XP rows, UI contract greps, file-replay + corrupt-file safety, curriculum ladder progression + never-demote + error path, agent-parser tolerance for rankup/eased labels). selftest + phase2 still PASS. New `tools/ladder_test.py` → 12 live checks FULL PASS against the real engine (fresh memory file): shotgun at spawn + after respawn, 60+60→promotion with remainder, rankup event, `skill=` override, 250-overflow → legend clamp with capped pot, buddy kill → eased-off + respawn still armed.
 - Debug method note: printf-instrumentation needs the game window FOCUSED (the tic loop pauses otherwise — a redirect-launched game sits frozen with zero NEMDBG lines until focus_buddydoom.ps1 runs); the phantom "XP drift" turned out to be real damage sources (self-splash) plus persisted pot state, identified by elimination across three instrumented runs.
 - Files: BuddyDoom/files/{p_nemesis.c,p_nemesis.h,p_ai_coop.c,p_ai_coop.h,p_inter.c,g_game.c,p_ai_llm.c}; nemesis/{config,livestate,dashboard,test_dashboard}.py; tools/ladder_test.py; PLAN §9/§12/§13 updated.
+
+**2026-10-02 — Phases 9.15–9.16 BUILT and live-verified (session 5 cont.): rank-up drama + dashboard v4**
+- User request: "rank-up drama, also make a really nice dashboard."
+- **9.15 Engine drama (display-only):** `P_AICoop_RankMoment(level)` fires on every promotion from `NEM_BuddyLesson` — a ring of 5 teleport-fog bursts around the buddy (4 compass points + one above, `sfx_telept`), a rotated `taunt:0..3` voice callout at VP_KILL priority (lumps pre-baked in buddydoom.wad), the in-game screen message "JEV RANKED UP -- he is getting better.", and a `>>> JEV reached the rank of X! <<<` console line. `P_AICoop_VictoryPause()`: after downing the human, the buddy stands still ~1.5 s and gloats (taunt) before re-engaging — armed from the p_inter.c kill block beside the demote, consumed at the top of the LIVE BuildCmd path. Demotes stay quiet (console ease-off line only). Rebuilt [100%].
+- Placement subtlety: the new functions live after the callout machinery in p_ai_coop.c (AICoop_Mo / AICoop_SayTagP / VP_* are file-statics) — first draft placed RankMoment before them and would not have linked; caught and moved same-session.
+- **9.16 Dashboard v4:** the explainer is now a full-width HERO panel — ladder stepper (5 glowing nodes rookie→legend, animated connector fills, pulsing current node, done-state styling), session scoreboard (6 tiles: squad deaths, hits you landed, damage dealt, rank-ups, eased-off, your deaths + a session clock), full-screen rank-up flash ("RANK UP / JEV IS NOW X" bloom + hero glow, deduped per rank, re-armed after any ease-off so re-earning a rank flashes again), gradient area fills on the three sparklines.
+- **LiveState scoreboard engine:** `_absorb_events` folds the observe event ring into counters (hit→hits+dmg, kill→kills, rankup→rankups, eased→eased; hp→0 edges count player deaths). Ring semantics learned live: seq numbering RESTARTS when the engine drops the whole nemesis block under buffer pressure (serializer skip), so a plain seq-cursor double-counts after every omission — the fix arms on first sight: non-empty ring ⇒ backlog (skip), empty ring ⇒ counter armed at −1. Verified live: rankups:1 counted from a protocol-forced promotion; eased:1 counted when the buddy killed the idle player during the same window.
+- Smoke-test gotcha (again): the engine is single-client — poking `buddy xp=` from a second socket silently lands nowhere; the probe must send pokes over the SAME link the dashboard loop owns.
+- Tests: test_dashboard extended (UI contract for ladder/scoreboard/flash + scoreboard arithmetic + ring-replay tolerance) → DASHBOARD PASS; selftest + phase2 PASS; full ladder_test.py run against the drama build → FULL PASS (12/12).
+- Files: BuddyDoom/files/{p_ai_coop.c,p_ai_coop.h,p_nemesis.c,p_inter.c}; nemesis/{livestate,dashboard,test_dashboard}.py; PLAN §9/§12 updated.

@@ -1278,6 +1278,7 @@ P_DamageMobj
 	    {
 		extern void NEM_NoteBuddyKillPlayer (void);	// p_nemesis.c
 		NEM_NoteBuddyKillPlayer ();
+		P_AICoop_VictoryPause ();		// Phase 9.15: gloat for a beat
 	    }
 	}
 	P_KillMobj (source, target);

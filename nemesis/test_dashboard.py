@@ -59,6 +59,46 @@ def _synthetic_obs() -> dict:
     }
 
 
+def test_scoreboard_stats() -> None:
+    """Phase 9.16: LiveState folds the engine event ring into session stats."""
+    import tempfile
+    old_lp, old_hp = config.LIVE_STATE_PATH, config.STATE_HISTORY_PATH
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.LIVE_STATE_PATH = os.path.join(tmpdir, "sb_live.json")
+        config.STATE_HISTORY_PATH = os.path.join(tmpdir, "sb_hist.jsonl")
+        live = LiveState()
+        # Feed an obs; the ring is baselined on first sight (no backlog counting).
+        _feed(live, _synthetic_obs(), times=1)
+        st1 = dict(live.stats)
+        # New events only: 2 kills, 2 hits (33 dmg), 1 rankup, 1 eased.
+        obs2 = _synthetic_obs()
+        obs2["nemesis"]["events"] = [
+            "912:eased:buddy:1", "911:rankup:buddy:2",
+            "910:hit:caco:plasma:13", "909:kill:shotgun:ssg",
+            "908:hit:shotgun:shotgun:20", "907:kill:imp:pistol",
+            *obs2["nemesis"]["events"],
+        ]
+        _feed(live, obs2, times=2)
+        st = live.stats
+        check(st["kills"] == st1["kills"] + 1, "kill count wrong: %r (st1=%r)" % (st, st1))
+        check(st["hits"] == st1["hits"] + 2, "hit count wrong: %r" % st)
+        check(st["dmg"] == st1["dmg"] + 33, "damage sum wrong: %r" % st)
+        check(st["rankups"] == st1["rankups"] + 1, "rankup count wrong: %r" % st)
+        check(st["eased"] == st1["eased"] + 1, "eased count wrong: %r" % st)
+        # Ring repeats (same seqs) must not double-count.
+        _feed(live, obs2, times=2)
+        check(live.stats["kills"] == st["kills"], "ring replay double-counted")
+        # Player death detection (hp 100 -> 0).
+        obs3 = _synthetic_obs()
+        obs3["player"]["health"] = 0
+        _feed(live, obs3, times=1)
+        obs4 = _synthetic_obs()
+        obs4["player"]["health"] = 100
+        _feed(live, obs4, times=1)
+        check(live.stats["pdeaths"] == 1, "player death not counted: %r" % live.stats)
+    config.LIVE_STATE_PATH, config.STATE_HISTORY_PATH = old_lp, old_hp
+
+
 def _feed(live: LiveState, obs: dict, times: int = 2) -> None:
     shim = dash._LiveShim()
     shim.last_action_name = "chase"
@@ -104,16 +144,23 @@ def test_endpoints_and_ui(tmpdir: str) -> None:
         page = body.decode("utf-8")
         check(code == 200, "GET / status %s" % code)
         # UI contract: the plain-English pieces a normal person needs.
-        check('id="explainer-panel"' in page, "explainer panel missing")
+        check('id="hero"' in page, "hero explainer panel missing")
         check("What is jev doing right now?" in page, "explainer headline missing")
         check('id="xpbar"' in page and 'id="xptext"' in page, "XP bar missing")
         check("RANK_UP_TOKEN" not in page, "placeholder leaked into page")
         for name in config.SKILL_LEVELS:
             check(name in page, "ladder label %r missing from page" % name)
-        check("jev rank (the ladder)" in page, "rank panel missing")
-        for anchor in ('id="heat"', 'id="tick"', 'id="spk_w"', 'id="spk_sk"'):
+        for anchor in ('id="ladder"', 'id="heat"', 'id="tick"', 'id="spk_w"', 'id="spk_sk"'):
             check(anchor in page, "panel anchor %s missing" % anchor)
         check("plainify" in page and "rankup" in page, "plain-English ticker missing")
+        # Phase 9.16 contract: hero ladder stepper, scoreboard, rank-up flash.
+        check('id="ladder"' in page and 'class="ladder"' in page, "hero ladder missing")
+        check("ldot" in page and "lbar" in page, "ladder stepper markup missing")
+        check('id="sb"' in page and "scoreboard" in page.lower(), "scoreboard missing")
+        check("rankFlash" in page and "RANK UP" in page, "rank-up flash missing")
+        check("drawScoreboard" in page, "scoreboard renderer missing")
+        for sid in ("sb_kills", "sb_hits", "sb_dmg", "sb_rankups", "sb_eased", "sb_pdeaths"):
+            check(sid in page, "scoreboard tile %s missing" % sid)
     finally:
         httpd.shutdown()
 
@@ -206,6 +253,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         test_endpoints_and_ui(tmpdir)
         test_file_replay(tmpdir)
+    test_scoreboard_stats()
     test_curriculum_ladder()
     test_event_label_tolerance()
     if failures:

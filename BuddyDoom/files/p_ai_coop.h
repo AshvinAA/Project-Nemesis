@@ -61,6 +61,15 @@ const char* P_AICoop_SkillName (int level);
 // only, rides the NEM_HUDPrint slot).
 void P_AICoop_SkillHud (void);
 
+// Phase 9.15: the rank-up drama moment (fog ring + sound + taunt + screen
+// message).  Display only -- no gameplay effect.  No-op when the buddy isn't
+// live (console/screen lines still print, so the moment is never lost).
+void P_AICoop_RankMoment (int level);
+// Phase 9.15: the buddy just downed the human -- it stands still and taunts
+// for a beat before re-engaging (display only).  Called from p_inter.c's
+// player-death block next to the demote.
+void P_AICoop_VictoryPause (void);
+
 // Current buddy state as a small enum (0=follow, 1=fight, 2=heal, 3=hold,
 // 4=come, 5=grab).  Exposed for the console / voice system.
 int  P_AICoop_State (void);

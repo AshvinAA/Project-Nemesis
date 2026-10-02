@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections import deque
 from typing import Any, Optional
 
 from . import config
+
+# Event labels from the engine ring: "<seq>:hit:<type>:<weapon>:<dmg>",
+# "<seq>:kill:<type>:<weapon>", "<seq>:rankup:buddy:<lvl>", "<seq>:eased:buddy:<lvl>".
+_EV_RE = re.compile(r"^(\d+):(hit|kill|rankup|eased):(.+)$")
 
 
 def _atomic_write_json(path: str, payload: dict) -> None:
@@ -41,8 +46,51 @@ class LiveState:
         self.events: deque[dict] = deque(maxlen=40)   # ticker feed
         self._last_write = 0.0
         self._last_hist = 0.0
+        # Phase 9.16: session scoreboard (what a normal person reads first).
+        self.stats = {"kills": 0, "hits": 0, "dmg": 0,
+                      "rankups": 0, "eased": 0, "pdeaths": 0}
+        self._ev_seq = -1          # last processed event ring seq (-1 = armed)
+        self._attached = False     # seen the first nemesis block with events?
+        self._last_php: Optional[int] = None
+        self._t0: Optional[float] = None
         os.makedirs(os.path.dirname(config.STATE_HISTORY_PATH) or ".",
                     exist_ok=True)
+
+    def _absorb_events(self, nem: dict) -> None:
+        """Fold new engine events into the scoreboard. The ring arrives
+        newest-first with unique seqs. The FIRST sight of the block arms the
+        counter: if the ring already has events they are backlog from before
+        we attached (skip them); an empty ring arms at -1 so everything that
+        happens AFTER attachment counts."""
+        if "events" not in nem:
+            return                       # block omitted this snapshot
+        parsed = []
+        for lab in nem.get("events") or []:
+            m = _EV_RE.match(str(lab))
+            if m:
+                parsed.append((int(m.group(1)), m.group(2), m.group(3)))
+        if not self._attached:
+            self._attached = True
+            if not parsed:
+                return                   # armed: everything from now counts
+            self._ev_seq = max(parsed[-1][0], self._ev_seq)   # skip backlog
+        parsed.sort(key=lambda e: e[0])                 # oldest first
+        for seq, kind, rest in parsed:
+            if seq <= self._ev_seq:
+                continue
+            self._ev_seq = max(self._ev_seq, seq)
+            if kind == "kill":
+                self.stats["kills"] += 1
+            elif kind == "hit":
+                self.stats["hits"] += 1
+                try:
+                    self.stats["dmg"] += int(rest.rsplit(":", 1)[1])
+                except (IndexError, ValueError):
+                    pass
+            elif kind == "rankup":
+                self.stats["rankups"] += 1
+            elif kind == "eased":
+                self.stats["eased"] += 1
 
     # -- event ticker -------------------------------------------------------
 
@@ -55,6 +103,14 @@ class LiveState:
         now_m = time.monotonic()
         nem = obs.get("nemesis", {}) if obs else {}
         player = obs.get("player", {}) if obs else {}
+        if self._t0 is None:
+            self._t0 = now_m
+        self._absorb_events(nem)
+        php = player.get("health")
+        if isinstance(php, int) and isinstance(self._last_php, int) \
+                and self._last_php > 0 and php <= 0:
+            self.stats["pdeaths"] += 1
+        self._last_php = php if isinstance(php, int) else self._last_php
         eps = (learner.epsilon_override if learner.epsilon_override is not None
                else learner.q.epsilon())
         skill = nem.get("buddy_skill")
@@ -74,6 +130,8 @@ class LiveState:
             "buddy_xp": xp if isinstance(xp, int) and 0 <= xp < config.BUDDY_XP_PER_RANK else 0,
             "buddy_xp_next": config.BUDDY_XP_PER_RANK,
             "player_weapon": player.get("weapon"),
+            "stats": dict(self.stats),
+            "session_secs": round(now_m - self._t0, 1) if self._t0 else 0.0,
             "last_terminal_r": learner.rewards_log[-1] if learner.rewards_log else 0.0,
             "surv_avg": round(learner._surv_avg(), 2),
             "player_hp": player.get("health"),
