@@ -71,6 +71,8 @@ void		NEM_NoteBuddyKillPlayer (void);
 void		NEM_NoteBuddyDamage (int damage);
 // XP progress toward the next rank (0..99), serialized as buddy_xp.
 int		NEM_BuddyXP (void);
+// Trainer takeover: zero the XP pot (the curriculum wave supersedes banked XP).
+void		NEM_ResetBuddyXP (void);
 
 // Persistence (nemesis_memory.dat sibling of buddydoom.cfg).
 void		NEM_Load (void);

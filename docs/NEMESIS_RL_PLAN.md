@@ -177,13 +177,42 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       `G_PlayerReborn` + `P_SpawnPlayer` at the level start instead of the single-player
       `ga_loadlevel` reload (a reload would despawn the nemesis and reset the training setup).
       Live-verified: death → back at 100 hp after 5 tics, nemesis mobj keeps the same id (no reload).
-- [x] **9.10 Skill HUD** (p_ai_coop.c `P_AICoop_SkillHud` + p_nemesis.c): `[buddy] skill N/4 (name)`
+- [x] **9.10 Skill HUD** (p_ai_coop.c `P_AICoop_SkillHud` + p_nemesis.c): `[buddy] rank N/4 (name)`
       rides the existing 1 Hz `NEM_HUDPrint` slot, with a store-driven fallback so the level stays
       visible even without the agent connected; the agent's `hud=` spec now carries `sk=N` too.
       Plain bracket-tag style, matching the codebase's `[nemesis]`/`[llm]` conventions.
-- KNOWN WRINKLE: `NEM_BuddyDeathLesson` fires on ANY shotgunguy death — including the RL nemesis
-      monster itself — so every nemesis death during training also promotes the buddy (an accidental
-      second curriculum signal alongside the trainer's). See D10.
+- [x] **9.11 Player shotgun** (g_game.c `G_PlayerReborn`): in hostile mode the human is armed with a
+      shotgun + full shells at EVERY (re)spawn (the reborn path covers level start, deaths and
+      in-place respawns; keepgear memcpy wins if the loadout exists). `readyweapon=pendingweapon=
+      wp_shotgun`. Live-verified via observe `player.weapon==2` at spawn AND after a buddy kill.
+- [x] **9.12 Ladder fix (rookie→legend, was pinned at 0)** — ROOT CAUSE: the Phase 9 promote signal
+      (`NEM_BuddyDeathLesson` on a "shotgunguy" kill) could NEVER fire — the hostile buddy is a bot
+      PLAYER (MT_PLAYER), not a tracked monster row, so its death never reached the lesson; only the
+      demote worked, pinning the ladder at 0 (D10's type-conflation wrinkle is gone with it).
+      Rebuilt as an XP ladder (p_nemesis.c + p_inter.c): every 100 points of post-armor health damage
+      the HUMAN deals the buddy = +1 rank (`NEM_NoteBuddyDamage`, ignores the buddy's own point-blank
+      self-splash and monster damage); buddy kills the human = −1 (now gated on the buddy actually
+      being the killer — pit/monster deaths don't demote); `buddy skill=N` (trainer takeover) resets
+      the XP pot; at legend the pot caps at 99 so a demote re-climbs on fresh XP; XP persists in
+      `nemesis_memory.dat` (buddy_xp at the file tail) and rides observe as `nemesis.buddy_xp`;
+      new protocol token `buddy xp=N` for testing; `buddy xp=`/damage also feed `NEM_PushEvent`
+      labels `rankup:buddy:N` / `eased:buddy:N` (agent's parser ignores them; dashboard translates).
+      Ladder renamed rookie/amateur/semi-pro/professional/legend (`P_AICoop_SkillName`, config.py).
+      ALSO fixed a latent `NEM_Load` bug: the version check was swallowed by a comment
+      (an unknown-format file would read garbage) — unknown layouts now bail to the neutral table.
+- [x] **9.13 Dashboard v3 + tests**: plain-English "What is jev doing right now?" panel (one live
+      sentence: current order in words, rank, rank blurb, your weapon + HP), XP progress bar to the
+      next rank (from `buddy_xp`), human-friendly event ticker translation ("the imp died to your
+      pistol", "▲ JEV RANKED UP → amateur"), tooltips on every panel, pulsing current rank segment,
+      player weapon mirrored into the snapshot; `port=0` (ephemeral) fixed in `start()` for tests.
+      New `python -m nemesis.test_dashboard` (DASHBOARD PASS): endpoints vs a real LiveState, UI
+      contract (explainer/XP bar/ladder labels), file-replay + corrupt-file safety, curriculum ladder
+      (progression, never-demote, error path), agent-parser tolerance for the new event kinds.
+- [x] **9.14 Live ladder verification** (`tools/ladder_test.py`, 12 checks against a real engine on
+      :31666): shotgun at spawn + after respawn, observe carries `buddy_xp`, 60+60 xp → one promotion
+      with 20 remainder banked, rankup event in the ring, `buddy skill=3` override, 250 xp overflow
+      → legend clamp with capped pot, buddy kill → eased-off + respawn still armed. FULL PASS
+      (2026-10-02, fresh `nemesis_memory.dat`).
 
 ## 10. Phase 7 — Demo video **[ ]**
 
@@ -208,7 +237,8 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
 | D7 | `nemesis propose` sync | Q-table-only v1; C-table sync optional later | OPEN (reco: Q-only) |
 | D8 | Crash dump relevance | Stale Sep 25 buddy-nav artifact — unrelated | RESOLVED |
 | D9 | Build toolchain | Portable w64devkit (GCC 16.2) + CMake 3.31.6 in `tools/` on F: — no admin needed; C: is 99% full so VS BuildTools cannot install (0x80070070). `tools/build_buddydoom.bat` = one-command build | LOCKED |
-| D10 | Buddy auto-lesson scope | `NEM_BuddyDeathLesson` fires on ANY shotgunguy death incl. the RL nemesis's own deaths — a second, accidental curriculum signal. Acceptable now; gate to non-nemesis kills if it fights the trainer's pacing | OPEN (reco: keep, watch pacing) |
+| D10 | Buddy auto-lesson scope | The shotgunguy-death promote NEVER fired (buddy is a bot player, not a row) — replaced in 9.12 by the XP ladder; kill-block demote now gated on the buddy actually being the killer | RESOLVED |
+| D11 | Ladder design (9.12) | XP = post-armor damage the HUMAN deals the buddy, 100/rank, pot persists, trainer `buddy skill=N` resets the pot, legend caps the pot at 99; buddy self-splash and monster damage don't count; demote only when the buddy kills the human | LOCKED |
 
 ## 13. Run cheat sheet (from HANDOFF.md — verified)
 
@@ -248,6 +278,18 @@ python -m nemesis.dashboard --live
 
 # Reset learned state
 rm BuddyDoom/run/nemesis_memory.dat
+
+# Offline tests (dashboard/ladder, full agent selftest, phase2)
+python -m nemesis.test_dashboard
+python -m nemesis.test_selftest
+python -m nemesis.test_phase2
+
+# Live ladder test (game running in -buddyhostile; probe takes the ONE client slot)
+python tools/ladder_test.py
+
+# Manual ladder poke (protocol): feed the buddy XP or set its rank directly
+#   buddy xp=60      (post-armor damage equivalent; 100 = +1 rank)
+#   buddy skill=2    (trainer takeover; resets the XP pot)
 ```
 
 ---
@@ -334,3 +376,14 @@ rm BuddyDoom/run/nemesis_memory.dat
 - Bug found in smoke test: `live_loop` originally took the dashboard port for the engine link (printed "watching the engine on :8787") — fixed to always use DIRECTOR_PORT; re-verified live (real tics, hp, history rows with full weight tables).
 - Verified: launcher `gameonly` boots the game (listener up on :31666), `--live` serves state+history, selftest + phase2 PASS after all edits.
 - Note: the bat writes no logs; if the dashboard fails to appear, run `python -m nemesis.dashboard --live` in a visible window to see the error (usually python missing from PATH).
+
+**2026-10-02 — Phases 9.11–9.14 BUILT and live-verified (session 5): player shotgun, working rank ladder, dashboard v3 + tests**
+- User request: give the player's character a shotgun; the buddy stays stuck in rookie — fix the ladder and test it; multiple dashboard tests + a UI a normal person understands (kept the rookie→amateur→professional idea but made it actually climb). No feedback wanted, just completion.
+- **Root cause of "stuck in rookie" (the headline find):** the Phase 9 promote signal compared a kill type against `"shotgunguy"`, but the nemesis row vocabulary is `"shotgun"` — AND the hostile buddy is a bot PLAYER (MT_PLAYER), not a tracked monster row, so its death never reached the lesson at all. Only the demote (buddy kills player) ever fired → the ladder was mathematically pinned at 0. The player-side `ff_protect` XOR also meant `source->player == target->player` self-damage (point-blank own splash) flows through `P_DamageMobj`.
+- **9.11 Player shotgun:** hostile mode grants `wp_shotgun` + full shells on every (re)spawn inside `G_PlayerReborn` (covers level start + the instant-respawn path); live-verified `player.weapon==2` at spawn and after dying to the buddy.
+- **9.12 XP ladder:** +1 rank per 100 post-armor damage the HUMAN deals the buddy (`NEM_NoteBuddyDamage`; buddy self-splash excluded by source-player check, monster damage excluded because it never reaches the hook); −1 when the buddy kills the human (demote now gated on the buddy being the killer — pit deaths no longer punish it); `buddy skill=N` resets the XP pot (trainer takeover); at legend the pot caps at 99 (a demote re-climbs on fresh XP); `buddy xp=N` protocol token; `rankup:/eased:` events in the observe ring; ladder renamed rookie/amateur/semi-pro/professional/legend (`P_AICoop_SkillName`, shared with HUD + dashboard). XP persists at the `nemesis_memory.dat` tail.
+- **Bugs found by the new tests/probes and fixed same-session:** (1) XP pot double-decrement on promotion (lesson zeroed AND the loop subtracted) — kept the remainder; (2) the buddy ranked ITSELF up via its own point-blank splash (ff_protect XOR lets self-damage through) — source-player gate added; (3) stale XP pot from earlier builds poisoned later sessions — trainer takeover resets the pot now; (4) latent `NEM_Load` version-check swallowed by a comment (unknown-format file read garbage) — proper bail-out; (5) dashboard `start(port=0)` ignored an ephemeral port — fixed.
+- **9.13 Dashboard v3:** plain-English "What is jev doing right now?" headline (order in words + rank + blurb + your weapon/HP), XP progress bar to the next rank, ticker translated to sentences ("the imp died to your pistol", "▲ JEV RANKED UP → amateur"), tooltips on every panel, pulsing current rank segment, weapon in the snapshot (`player_weapon`), `buddy_xp`/`buddy_xp_next` keys.
+- **9.13b Tests:** new `python -m nemesis.test_dashboard` → DASHBOARD PASS (endpoints vs a real LiveState incl. rank/XP rows, UI contract greps, file-replay + corrupt-file safety, curriculum ladder progression + never-demote + error path, agent-parser tolerance for rankup/eased labels). selftest + phase2 still PASS. New `tools/ladder_test.py` → 12 live checks FULL PASS against the real engine (fresh memory file): shotgun at spawn + after respawn, 60+60→promotion with remainder, rankup event, `skill=` override, 250-overflow → legend clamp with capped pot, buddy kill → eased-off + respawn still armed.
+- Debug method note: printf-instrumentation needs the game window FOCUSED (the tic loop pauses otherwise — a redirect-launched game sits frozen with zero NEMDBG lines until focus_buddydoom.ps1 runs); the phantom "XP drift" turned out to be real damage sources (self-splash) plus persisted pot state, identified by elimination across three instrumented runs.
+- Files: BuddyDoom/files/{p_nemesis.c,p_nemesis.h,p_ai_coop.c,p_ai_coop.h,p_inter.c,g_game.c,p_ai_llm.c}; nemesis/{config,livestate,dashboard,test_dashboard}.py; tools/ladder_test.py; PLAN §9/§12/§13 updated.

@@ -668,6 +668,7 @@ int P_AICoop_SetSkill (int level)
     {
 	buddy_skill = level;
 	NEM_SetBuddySkill (level);	// the store is authoritative (persisted + observed)
+	NEM_ResetBuddyXP ();		// trainer takeover: the wave supersedes banked XP
 	react_timer = 0;		// re-engage immediately at the new level
 	printf ("P_AICoop: buddy skill -> %d (%s)\n", level,
 		P_AICoop_SkillName (level));

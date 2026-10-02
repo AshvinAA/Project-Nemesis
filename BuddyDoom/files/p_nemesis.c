@@ -205,11 +205,22 @@ void NEM_NoteBuddyDamage (int damage)
     if (damage > 1000) damage = 1000;		// protocol/edge clamp
     if (!nem_initialized) NEM_Init ();
     nem_buddy_dmg += damage;
-    while (nem_buddy_dmg >= NEM_BUDDY_XP)
+    while (nem_buddy_dmg >= NEM_BUDDY_XP && nem_buddy_skill < 4)
     {
 	nem_buddy_dmg -= NEM_BUDDY_XP;
 	NEM_BuddyLesson (+1);
     }
+    // At legend the bar just idles nearly full -- a demote then climbs straight
+    // back on FRESH xp, not on an old backlog.
+    if (nem_buddy_skill >= 4 && nem_buddy_dmg > NEM_BUDDY_XP - 1)
+	nem_buddy_dmg = NEM_BUDDY_XP - 1;
+}
+
+// Trainer takeover: zero the XP pot (a `buddy skill=N` push means the Python
+// curriculum is steering now; its wave supersedes whatever XP was banked).
+void NEM_ResetBuddyXP (void)
+{
+    nem_buddy_dmg = 0;
 }
 
 // XP progress toward the next rank (0..NEM_BUDDY_XP-1), for the observe.

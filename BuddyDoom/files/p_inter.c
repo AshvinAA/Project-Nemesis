@@ -1215,9 +1215,13 @@ P_DamageMobj
 	    player->health = 0;
 
 	// Phase 9.11: the hostile buddy learns from the punishment it absorbs.
-	// Post-armor health damage dealt by the human == buddy XP toward its
-	// next rank (the ladder used to be pinned at rookie -- see p_nemesis.c).
+	// Post-armor health damage dealt by the HUMAN == buddy XP toward its next
+	// rank (the ladder used to be pinned at rookie -- see p_nemesis.c).
+	// The buddy's own point-blank splash/pellets on itself don't count: the
+	// ff_protect XOR lets self-damage through, and without this gate a fighting
+	// buddy ranks itself up by shooting its own feet.
 	if (damage > 0 && source && source->player
+	    && !P_AICoop_IsBuddy (source->player)
 	    && P_AICoop_IsBuddy (player) && P_AICoop_HostileMode ())
 	{
 	    extern void NEM_NoteBuddyDamage (int);		// p_nemesis.c

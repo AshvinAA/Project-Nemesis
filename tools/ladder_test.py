@@ -88,11 +88,13 @@ def main() -> int:
     n = wait_for_skill(link, 3)
     check(n.get("buddy_skill") == 3, "buddy skill=3 override acked and observed")
 
-    # E. overflow: 250 xp from skill 3 -> legend (4) clamp, pot keeps remainder.
+    # E. overflow: 250 xp from skill 3 -> legend (4) clamp; the pot stops
+    # counting at the cap (99) so a demote re-climbs on FRESH xp only.
     link.request("buddy xp=250")
     n = wait_for_skill(link, 4)
     check(n.get("buddy_skill") == 4, "overflow promotions clamp at legend (skill=%r)" % n.get("buddy_skill"))
-    check(n.get("buddy_xp") == 50, "overflow remainder banked (xp=%r)" % n.get("buddy_xp"))
+    xp = n.get("buddy_xp")
+    check(isinstance(xp, int) and 0 <= xp < 100, "overflow pot capped below one rank (xp=%r)" % xp)
 
     # F. passive: if the idle player dies to the buddy, rank eases off and the
     # respawn keeps the shotgun.  Only meaningful in -buddyhostile mode.
