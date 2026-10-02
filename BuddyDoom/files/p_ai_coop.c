@@ -644,6 +644,21 @@ int P_AICoop_HostileMode (void)
 // the director protocol (`buddy skill=N`); the Python trainer promotes the
 // buddy as episodes complete.  Returns the clamped level, or -1 when the
 // buddy isn't in hostile mode (the curriculum is meaningless for an ally).
+
+// Phase 9.11: rank names -- the rookie -> amateur -> semi-pro ->
+// professional -> legend ladder (the shared display vocabulary).
+const char* P_AICoop_SkillName (int level)
+{
+    switch (level)
+    {
+	case 0: return "rookie";
+	case 1: return "amateur";
+	case 2: return "semi-pro";
+	case 3: return "professional";
+	default: return "legend";
+    }
+}
+
 int P_AICoop_SetSkill (int level)
 {
     if (!buddy_hostile) return -1;
@@ -655,8 +670,7 @@ int P_AICoop_SetSkill (int level)
 	NEM_SetBuddySkill (level);	// the store is authoritative (persisted + observed)
 	react_timer = 0;		// re-engage immediately at the new level
 	printf ("P_AICoop: buddy skill -> %d (%s)\n", level,
-		level == 0 ? "clueless" : level == 1 ? "recruit"
-		: level == 2 ? "competent" : level == 3 ? "sharp" : "veteran");
+		P_AICoop_SkillName (level));
     }
     return buddy_skill;
 }
@@ -671,22 +685,10 @@ int P_AICoop_Skill (void)
 // NEM_HUDPrint slot (the Python agent's hud= spec); when the agent is away,
 // NEM_HUDFallback keeps the skill visible from the store (which still learns
 // via NEM_TacticNote even without the trainer).
-static const char* skill_name (int level)
-{
-    switch (level)
-    {
-	case 0: return "clueless";
-	case 1: return "recruit";
-	case 2: return "competent";
-	case 3: return "sharp";
-	default: return "veteran";
-    }
-}
-
 void P_AICoop_SkillHud (void)
 {
     int level = NEM_BuddySkill ();
-    C_Printf ("[buddy] skill %d/4 (%s)\n", level, skill_name (level));
+    C_Printf ("[buddy] rank %d/4 (%s)\n", level, P_AICoop_SkillName (level));
 }
 
 // Public read-only accessor for coop_state (used by c_console.c for the voice

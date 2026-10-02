@@ -887,6 +887,10 @@ static void AI_HandleLine (char* line, int client)
 	    // exists for the training opponent.  P_AICoop_SetSkill routes into the
 	    // nemesis store (persisted + observed) and re-syncs the local mirror.
 	    else if (!strcmp(kv,"skill")) P_AICoop_SetSkill (atoi(eq));
+	    // Phase 9.11: `buddy xp=N` feeds the rank ladder directly (the same
+	    // NEM_NoteBuddyDamage path the player's damage uses) so tools/tests
+	    // can exercise promotions without a human aiming.
+	    else if (!strcmp(kv,"xp")) NEM_NoteBuddyDamage (atoi(eq));
 	}
 	P_AICoop_SetDirective (AI_BuddyTactic(order_s), P_AI_MobjForId(focus), bx, by, fortics);
 	if (client >= 0) (void)!write (client, "ok\n", 3);

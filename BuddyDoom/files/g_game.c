@@ -1111,9 +1111,7 @@ void G_PlayerReborn (int player)
     p->ammo[am_clip] = 50;
 
     for (i=0 ; i<NUMAMMO ; i++)
-	p->maxammo[i] = maxammo[i];
-
-    if (keepgear)
+	p->maxammo[i] = maxammo[i];    if (keepgear)
     {
 	memcpy (p->weaponowned, owned,   sizeof(p->weaponowned));
 	memcpy (p->ammo,        ammo,    sizeof(p->ammo));
@@ -1126,6 +1124,17 @@ void G_PlayerReborn (int player)
 	p->weaponowned[wp_pistol] = true;
 	p->readyweapon   = ready;
 	p->pendingweapon = pending;
+    }
+
+    // Phase 9.11: hostile training arms the human with a shotgun every
+    // (re)spawn.  Fist+pistol can't meaningfully pressure the buddy, and the
+    // rank ladder (NEM_NoteBuddyDamage) needs the player to actually land
+    // damage.  Full shells: the session is about the duel, not the scrounge.
+    if (P_AICoop_HostileMode ())
+    {
+	p->weaponowned[wp_shotgun] = true;
+	p->ammo[am_shell] = p->maxammo[am_shell];
+	p->readyweapon = p->pendingweapon = wp_shotgun;
     }
 }
 

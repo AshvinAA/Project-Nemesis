@@ -60,6 +60,7 @@ class LiveState:
         skill = nem.get("buddy_skill")
         skill = skill if isinstance(skill, int) else curriculum.level if curriculum else 0
         levels = config.SKILL_LEVELS
+        xp = nem.get("buddy_xp")
         snap = {
             "ts": round(time.time(), 3),
             "tic": obs.get("tic") if obs else None,
@@ -70,6 +71,9 @@ class LiveState:
             "buddy_skill": skill,
             "buddy_skill_name": levels[skill] if isinstance(skill, int)
                                 and 0 <= skill < len(levels) else "?",
+            "buddy_xp": xp if isinstance(xp, int) and 0 <= xp < config.BUDDY_XP_PER_RANK else 0,
+            "buddy_xp_next": config.BUDDY_XP_PER_RANK,
+            "player_weapon": player.get("weapon"),
             "last_terminal_r": learner.rewards_log[-1] if learner.rewards_log else 0.0,
             "surv_avg": round(learner._surv_avg(), 2),
             "player_hp": player.get("health"),

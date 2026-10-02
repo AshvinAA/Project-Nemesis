@@ -89,7 +89,8 @@ typedef struct
 
 static nemrow_t	nem_rows[NEM_TYPES];
 static int	nem_buddy_skill;	// Phase 9: hostile-buddy curriculum level 0..4
-				// (0 = clueless; persisted with the table)
+				// (0 = rookie; persisted with the table)
+static int	nem_buddy_dmg;		// Phase 9.11: XP toward the next rank (dmg absorbed)
 static int	nem_initialized;
 
 // Ground-truth event ring. Labels are unique (index embedded) so the bridge
@@ -163,10 +164,17 @@ void NEM_NoteDamageM (const char* type, mobj_t* source, int damage, int weapon_i
 }
 
 // Phase 9 auto-lessons: the buddy learns even without the trainer connected.
-// Every time the PLAYER kills the hostile buddy it takes a step up (it died
-// doing something wrong); every time the BUDDY KILLS the player a step down
-// (the human is already struggling).  The Python trainer's `buddy skill=N`
-// overrides these — they only move the level when they fire.
+// Phase 9.11 rework: the old promote signal (+1 when the player killed a
+// "shotgunguy" row) NEVER fired -- the hostile buddy is a bot PLAYER
+// (MT_PLAYER), not a tracked monster row, so its death never reached the
+// lesson and only the demote worked, pinning the ladder at 0 (rookie).
+// The ladder now climbs on XP: every NEM_BUDDY_XP points of post-armor
+// damage the human inflicts on the hostile buddy is one rank (it absorbed a
+// beating -- it trains harder); every time the BUDDY KILLS the player it
+// drops a rank (the human is already struggling).  The Python trainer's
+// `buddy skill=N` overrides these -- they only move the level when they fire.
+#define NEM_BUDDY_XP	100		// damage absorbed per rank
+
 static void NEM_BuddyLesson (int delta)
 {
     int ns = nem_buddy_skill + delta;
@@ -174,17 +182,40 @@ static void NEM_BuddyLesson (int delta)
     if (ns > 4) ns = 4;
     if (ns != nem_buddy_skill)
     {
+	char label[48];
 	nem_buddy_skill = ns;
-	printf ("NEM: hostile buddy %s to skill %d%s\n",
-		delta > 0 ? "promoted" : "demoted", ns,
-		nem_buddy_skill == 4 ? " (veteran)" : nem_buddy_skill == 0 ? " (clueless)" : "");
+	printf ("NEM: hostile buddy %s to skill %d (%s)\n",
+		delta > 0 ? "promoted" : "demoted", ns, P_AICoop_SkillName (ns));
+	C_Printf ("[buddy] %s %d/4 (%s)\n", delta > 0 ? "RANK UP ->" : "eased off ->",
+		  ns, P_AICoop_SkillName (ns));
+	// Bridge/dashboard event (the RL agent's label parser ignores unknown
+	// kinds; the dashboard colors rankup/eased lines).
+	snprintf (label, sizeof(label), "%ld:%s:buddy:%d",
+		  nem_event_seq++, delta > 0 ? "rankup" : "eased", ns);
+	NEM_PushEvent (label);
     }
 }
 
-// Skill-up on the player killing the shotgun-guy row (from NEM_NoteKill).
-static void NEM_BuddyDeathLesson (const char* type)
+// Public auto-lesson hook (p_inter.c, player-damage path): the hostile buddy
+// absorbed `damage` from the human -- XP toward its next rank.  Also driven
+// from the director protocol (`buddy xp=N`) so tools can test the ladder.
+void NEM_NoteBuddyDamage (int damage)
 {
-    if (!strcmp (type, "shotgunguy")) NEM_BuddyLesson (+1);
+    if (damage <= 0) return;
+    if (damage > 1000) damage = 1000;		// protocol/edge clamp
+    if (!nem_initialized) NEM_Init ();
+    nem_buddy_dmg += damage;
+    while (nem_buddy_dmg >= NEM_BUDDY_XP)
+    {
+	nem_buddy_dmg -= NEM_BUDDY_XP;
+	NEM_BuddyLesson (+1);
+    }
+}
+
+// XP progress toward the next rank (0..NEM_BUDDY_XP-1), for the observe.
+int NEM_BuddyXP (void)
+{
+    return nem_buddy_dmg;
 }
 
 // Public auto-lesson hook (p_inter.c, kill block): the hostile buddy killed
@@ -210,10 +241,8 @@ void NEM_NoteKill (const char* type, mobj_t* source, int weapon_idx)
 		  nem_event_seq++, nem_type_names[ti], nem_weapon_names[wi]);
 	NEM_PushEvent (label);
     }
-    // Phase 9 auto-lesson: the player just killed the hostile buddy — it earns
-    // a skill step (it died doing something wrong).  Killed by anything else,
-    // or when the trainer is steering, this is neutral.
-    NEM_BuddyDeathLesson (type);
+    // (Phase 9.11: the shotgunguy-row kill no longer feeds the buddy ladder --
+    // that was the D10 type conflation; the ladder rides the bot's own XP.)
     (void)source;
 }
 
@@ -362,7 +391,9 @@ int NEM_Serialize (char* buf, int buflen)
 	n += snprintf (buf + n, buflen - n, "}}");
 	if (n > buflen - 256) break;
     }
-    n += snprintf (buf + n, buflen - n, "],\"buddy_skill\":%d,\"events\":[", nem_buddy_skill);
+    n += snprintf (buf + n, buflen - n,
+		   "],\"buddy_skill\":%d,\"buddy_xp\":%d,\"events\":[",
+		   nem_buddy_skill, nem_buddy_dmg);
 
     {
 	int e, first = 1;
@@ -493,7 +524,12 @@ void NEM_Load (void)
     if (!nem_initialized) NEM_Init ();
     snprintf (path, sizeof(path), "%snemesis_memory.dat", NEM_DirPrefix ());
     f = fopen (path, "rb");
-    if (!f) return;					// fresh install: neutral table	if (fread (&ver, sizeof(ver), 1, f) == 1 && ver == NEM_VERSION)
+    if (!f) return;					// fresh install: neutral table
+    if (fread (&ver, sizeof(ver), 1, f) != 1 || ver != NEM_VERSION)
+    {
+	fclose (f);
+	return;					// unknown layout: keep the neutral table
+    }
     {
 	for (i = 0; i < NEM_TYPES; i++)
 	{
@@ -504,11 +540,16 @@ void NEM_Load (void)
 	    if (fread (r->deaths_by_weapon, sizeof(int), NEM_WEAPONS, f) != NEM_WEAPONS) break;
 	}
 	// Phase 9: the curriculum level rides at the tail.  Files written before
-	// it existed simply fail this read and keep the clueless default.
+	// it existed simply fail this read and keep the rookie default.
 	if (fread (&nem_buddy_skill, sizeof(int), 1, f) != 1)
 	    nem_buddy_skill = 0;
 	if (nem_buddy_skill < 0 || nem_buddy_skill > 4)
 	    nem_buddy_skill = 0;
+	// Phase 9.11: XP progress toward the next rank rides after it (older
+	// files simply fail this read and start the pot at 0).
+	if (fread (&nem_buddy_dmg, sizeof(int), 1, f) != 1
+	    || nem_buddy_dmg < 0 || nem_buddy_dmg >= NEM_BUDDY_XP)
+	    nem_buddy_dmg = 0;
     }
     fclose (f);
 }
@@ -532,6 +573,7 @@ void NEM_Save (void)
 	fwrite (r->deaths_by_weapon, sizeof(int), NEM_WEAPONS, f);
     }
     fwrite (&nem_buddy_skill, sizeof(int), 1, f);	// Phase 9: curriculum level
+    fwrite (&nem_buddy_dmg, sizeof(int), 1, f);	// Phase 9.11: XP progress
     fclose (f);
 }
 

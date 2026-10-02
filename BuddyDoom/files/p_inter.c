@@ -1214,6 +1214,16 @@ P_DamageMobj
 	if (player->health < 0)
 	    player->health = 0;
 
+	// Phase 9.11: the hostile buddy learns from the punishment it absorbs.
+	// Post-armor health damage dealt by the human == buddy XP toward its
+	// next rank (the ladder used to be pinned at rookie -- see p_nemesis.c).
+	if (damage > 0 && source && source->player
+	    && P_AICoop_IsBuddy (player) && P_AICoop_HostileMode ())
+	{
+	    extern void NEM_NoteBuddyDamage (int);		// p_nemesis.c
+	    NEM_NoteBuddyDamage (damage);
+	}
+
 	P_AICoop_NoteDamage (target, source, damage);	// buddy danger heatmap + friendly-fire callout
 	P_Director_NoteDamage (target, damage);		// L4D stress: damage taken (burst-weighted)
 
@@ -1255,11 +1265,16 @@ P_DamageMobj
 	if (target->player && !P_AICoop_IsBuddy (target->player))
 	{
 	    P_Director_Say ("dir:death", 3, 1);	// (voice) the director taunts a survivor's death
-	    // Phase 9 auto-lesson: the human just died to the hostile buddy --
-	    // the curriculum eases off one step (unless the trainer is steering,
-	    // in which case its next `buddy skill=` simply overrides this).
-	    extern void NEM_NoteBuddyKillPlayer (void);		// p_nemesis.c
-	    NEM_NoteBuddyKillPlayer ();
+	    // Phase 9 auto-lesson: the human just died TO THE HOSTILE BUDDY --
+	    // the curriculum eases off one step.  (Phase 9.11: gated on the
+	    // buddy actually being the killer -- pit/monster deaths are not the
+	    // buddy's doing, so they no longer demote it.)  The trainer's next
+	    // `buddy skill=` simply overrides this either way.
+	    if (source && source->player && P_AICoop_IsBuddy (source->player))
+	    {
+		extern void NEM_NoteBuddyKillPlayer (void);	// p_nemesis.c
+		NEM_NoteBuddyKillPlayer ();
+	    }
 	}
 	P_KillMobj (source, target);
 	// Downed buddy: it must end up as a readable, revivable body on the ground (gray

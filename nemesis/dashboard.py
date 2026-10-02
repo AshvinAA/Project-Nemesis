@@ -118,28 +118,49 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
 .foot{margin-top:12px;font-size:10px;color:#31415e;text-align:center;letter-spacing:1px}
 .wbline{font-size:11px;color:var(--dim);white-space:pre-line;line-height:1.7}
 .wbline b{color:var(--am)}
+/* Phase 9.13: plain-English explainer + XP bar */
+.explain-big{font-size:17px;line-height:1.5;color:#eaf4ff;margin:2px 0 8px}
+.explain-big b{color:var(--cy);text-shadow:0 0 10px #22d3ee44}
+.explain-sub{font-size:11px;color:var(--dim);line-height:1.65}
+.xpwrap{position:relative;height:20px;background:#0a101c;border:1px solid var(--line);
+  border-radius:6px;margin-top:10px;overflow:hidden}
+.xpbar{height:100%;width:0;background:linear-gradient(90deg,#0ea5b7,#22d3ee);
+  box-shadow:0 0 14px #22d3ee66;transition:width .45s ease}
+.xpbar.max{background:linear-gradient(90deg,#fbbf24,#f472b6);box-shadow:0 0 14px #fbbf2466}
+.xptext{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:#eaf4ff;text-shadow:0 1px 2px #000;letter-spacing:1px}
+ul.tick li.demote{color:var(--am)}
+.seg.cur{animation:segp 1.6s ease-in-out infinite}
+@keyframes segp{0%,100%{box-shadow:0 0 6px #22d3ee44}50%{box-shadow:0 0 18px #22d3eecc}}
 </style></head><body><div class="wrap">
 <div class="bar">
   <h1>Nemesis <span class="sub">// weight-evolution console — watching the jev learn</span></h1>
   <div class="status" id="status"><span class="pulse"></span>connecting…</div>
 </div>
 <div class="grid">
-  <div class="panel c3"><h2>Episode</h2><div class="big" id="ep">–</div>
+  <div class="panel c3" title="How many training episodes the nemesis squad has finished. One episode = jev spawns, fights, and dies (or you die). More episodes = more learning."><h2>Episode</h2><div class="big" id="ep">–</div>
     <div style="font-size:10px;color:var(--dim);margin-top:4px" id="epsub">waiting for agent</div></div>
-  <div class="panel c3"><h2>Epsilon (chaos)</h2><div class="big" id="eps">–</div>
+  <div class="panel c3" title="Epsilon is the share of decisions jev makes at random. High = still experimenting. Low = using what it learned. It only goes down over time."><h2>Epsilon (chaos)</h2><div class="big" id="eps">–</div>
     <div style="font-size:10px;color:var(--dim);margin-top:4px" id="epssub">explore vs exploit</div></div>
-  <div class="panel c3"><h2>Survival avg</h2><div class="big" id="surv">–<span class="u"> s</span></div>
+  <div class="panel c3" title="Average number of seconds the nemesis stays alive per episode. Should climb as it gets smarter."><h2>Survival avg</h2><div class="big" id="surv">–<span class="u"> s</span></div>
     <div style="font-size:10px;color:var(--dim);margin-top:4px" id="rsub">last terminal: –</div></div>
-  <div class="panel c3"><h2>Player HP</h2><div class="big" id="hp">–</div>
+  <div class="panel c3" title="Your current health, and the weapon you are holding. In hostile training mode you spawn with a shotgun."><h2>Player HP</h2><div class="big" id="hp">–</div>
     <div style="font-size:10px;color:var(--dim);margin-top:4px" id="act">act: –</div></div>
 
-  <div class="panel c6"><h2>Hostile-buddy skill (curriculum) <span class="r" id="skpush"></span></h2>
+  <div class="panel c12" id="explainer-panel" title="One sentence a normal person can read: what jev is doing this second, what rank he is, and what will move him up or down the ladder.">
+    <h2>What is jev doing right now?</h2>
+    <div class="explain-big" id="explain">waiting for the engine…</div>
+    <div class="explain-sub" id="explain2">the training duel: jev hunts you, you rough him up — every 100 damage he absorbs promotes him one rank; if he kills you, he eases off one rank</div>
+    <div class="xpwrap" title="XP = the damage YOU have dealt jev since his last rank-up. Fill the bar and he promotes."><div class="xpbar" id="xpbar"></div><span class="xptext" id="xptext"></span></div>
+  </div>
+
+  <div class="panel c6" title="jev's rank ladder: rookie → amateur → semi-pro → professional → legend. It climbs when he absorbs ~100 of your damage per rank, drops when he kills you. The engine remembers the rank across sessions."><h2>jev rank (the ladder) <span class="r" id="skpush"></span></h2>
     <div class="big" id="skname" style="font-size:24px">–</div>
     <div class="meter" id="meter"></div>
     <div class="mlabels" id="mlabels"></div>
-    <div style="font-size:10px;color:var(--dim);margin-top:8px" id="sksub">level 0 = almost useless; lessons: +1 per buddy death, −1 when it kills you</div>
+    <div style="font-size:10px;color:var(--dim);margin-top:8px" id="sksub">+1 rank per 100 damage you deal him · −1 when he kills you · rank persists between runs</div>
   </div>
-  <div class="panel c6"><h2>Learned weight heatmap — nemesis rows</h2>
+  <div class="panel c6" title="What jev's squad has learned, per monster type: green = the squad favors that tactic (it worked), red = it avoids that tactic (it got monsters killed). Numbers are multipliers on the tactic's base chance."><h2>Learned weight heatmap — nemesis rows</h2>
     <table class="heat" id="heat"></table>
     <div class="legend">
       <span><span class="chip" style="background:#f87171"></span> punished (&lt;1.0)</span>
@@ -149,14 +170,14 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
     </div>
   </div>
 
-  <div class="panel c8"><h2>Weight drift — how jev keeps retuning the tactics
+  <div class="panel c8" title="Each line is one tactic, averaged over the squad. When the line moves, jev just re-tuned that tactic from what killed his monsters — this is the learning, live."><h2>Weight drift — how jev keeps retuning the tactics
       <span class="r" id="wdrift_r"></span></h2>
     <canvas class="spk tall" id="spk_w"></canvas>
     <div class="leg" id="wleg"></div>
   </div>
-  <div class="panel c4"><h2>Event ticker</h2><ul class="tick" id="tick"></ul></div>
+  <div class="panel c4" title="Everything that just happened, translated to plain English: kills, hits, and jev's rank changes."><h2>Event ticker</h2><ul class="tick" id="tick"></ul></div>
 
-  <div class="panel c6"><h2>Telemetry — last 15 min</h2>
+  <div class="panel c6" title="The agent's own numbers over the last ~15 minutes: chaos level, reward per episode, and how long the nemesis survives."><h2>Telemetry — last 15 min</h2>
     <div class="spkrow"><div class="spkhead"><span>epsilon</span><span id="spk_eps_v"></span></div>
       <canvas class="spk" id="spk_eps"></canvas></div>
     <div class="spkrow"><div class="spkhead"><span>episode terminal reward</span><span id="spk_r_v"></span></div>
@@ -164,9 +185,9 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
     <div class="spkrow"><div class="spkhead"><span>survival seconds / player hp</span><span id="spk_surv_v"></span></div>
       <canvas class="spk" id="spk_surv"></canvas></div>
   </div>
-  <div class="panel c6"><h2>Skill over time <span class="r">curriculum level, 1 Hz</span></h2>
+  <div class="panel c6" title="jev's rank over time (step chart) — every step up is ~100 of your damage absorbed; every dip is a kill he scored on you."><h2>Rank over time <span class="r">the ladder, 1 Hz</span></h2>
     <canvas class="spk" id="spk_sk" style="height:80px"></canvas>
-    <h2 style="margin-top:12px">Weapon bias per type</h2>
+    <h2 style="margin-top:12px" title="Which of YOUR weapons the squad has learned to fear (positive) or shrug off (negative), per monster type.">Weapon bias per type</h2>
     <div class="wbline" id="wbias">no learned bias yet — the nemesis has to die (or kill) first</div>
   </div>
   <div class="foot">PROJECT NEMESIS // phase 9 // no stat buffs — the weights are the whole story</div>
@@ -176,6 +197,18 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
 const ORDERS=__ORDERS__;
 const LEVELS=__LEVELS__;
 const OCOLORS=__OCOLORS__;
+const WEAPONS=["fist","pistol","shotgun","chaingun","rocket","plasma","bfg","chainsaw","ssg"];
+const NICE={zombie:"zombie man",shotgun:"shotgun guy",chaingun:"chaingunner",imp:"imp",
+  pinky:"pinky",spectre:"spectre",lost:"lost soul",caco:"cacodemon",pain:"pain elemental",
+  knight:"hell knight",baron:"baron of hell",revenant:"revenant",mancubus:"mancubus",
+  arachnotron:"arachnotron"};
+const ACT={chase:"hunting you down",hold:"holding position, watching you",
+  fallback:"backing off to regroup",flank_left:"sneaking around your left",
+  flank_right:"sneaking around your right",ambush:"lying in ambush",
+  focus_fire:"standing his ground and firing",use_door:"working a door to reach you"};
+const RANK_BLURB=["barely knows which end of the gun is which",
+  "starting to aim before he shoots","fast reactions — he keeps his distance now",
+  "punishes every mistake — do not miss","he has seen everything. Good luck."];
 let hist=[];
 
 const $=id=>document.getElementById(id);
@@ -217,7 +250,10 @@ function drawSkill(sk){
     m.innerHTML=LEVELS.map(()=>`<div class="seg"></div>`).join("");
     lb.innerHTML=LEVELS.map(n=>`<span>${n}</span>`).join("");
   }
-  [...m.children].forEach((el,i)=>el.classList.toggle("on",i<=sk));
+  [...m.children].forEach((el,i)=>{
+    el.classList.toggle("on",i<=sk);
+    el.classList.toggle("cur",i===sk);
+  });
   [...lb.children].forEach((el,i)=>el.classList.toggle("cur",i===sk));
   $("skname").textContent=LEVELS[sk]||("level "+sk);
 }
@@ -323,17 +359,69 @@ function drawSkillHist(rows){
   ctx.fillStyle="#5c6f8f";ctx.font="9px monospace";
   for(let l=0;l<LEVELS.length;l++){
     ctx.fillText(LEVELS[l],8,Y(l)-2);
-    ctx.fillStyle="#16223a";ctx.fillRect(58,Y(l),w-64,1);ctx.fillStyle="#5c6f8f";
+    ctx.fillStyle="#16223a";ctx.fillRect(74,Y(l),w-80,1);ctx.fillStyle="#5c6f8f";
   }
-  $("spk_sk").title=`now: skill ${cur} (${LEVELS[cur]||"?"})`;
+  $("spk_sk").title=`now: rank ${cur} (${LEVELS[cur]||"?"})`;
+}
+// Translate an engine event label into a sentence a normal person reads.
+// Labels look like "905:hit:shotgun:shotgun:21", "906:kill:imp:pistol",
+// "907:rankup:buddy:2", "908:eased:buddy:1" (p_nemesis.c event ring).
+function plainify(t){
+  const m=/^(\\d+):(hit|kill|rankup|eased):([\\s\\S]+)$/.exec(t);
+  if(!m)return t;
+  const kind=m[2],rest=m[3].split(":");
+  if(kind==="hit"&&rest.length>=3)
+    return `you hit the ${NICE[rest[0]]||rest[0]} for ${rest[2]} (${rest[1]})`;
+  if(kind==="kill"&&rest.length>=2)
+    return `the ${NICE[rest[0]]||rest[0]} died to your ${rest[1]}`;
+  if(kind==="rankup"){
+    const l=parseInt(rest[rest.length-1]||"0",10);
+    return `▲ JEV RANKED UP → ${LEVELS[l]||l} — he trained on the beating you gave him`;
+  }
+  if(kind==="eased"){
+    const l=parseInt(rest[rest.length-1]||"0",10);
+    return `▼ jev eased off → ${LEVELS[l]||l} — he killed you, so he is going easier on you`;
+  }
+  return t;
 }
 function classify(t){
-  const s=t.toLowerCase();
+  const s=String(t).toLowerCase();
+  if(s.includes("rankup")||s.includes("promot"))return"promo";
+  if(s.includes("eased")||s.includes("demot"))return"demote";
   if(s.includes("killed")&&s.includes("shotgunguy"))return"kill";
-  if(s.includes("promot"))return"promo";
-  if(s.includes("demot"))return"kill";
+  if(s.includes("kill:"))return"kill";
   if(s.includes("spawn"))return"spawn";
   return"";
+}
+// The plain-English headline: what jev is doing, his rank, and your gear.
+function explain(s){
+  const el=$("explain");
+  if(!s.tic){el.textContent="waiting for the engine…";return;}
+  const sk=typeof s.buddy_skill==="number"?s.buddy_skill:0;
+  const rank=LEVELS[sk]||("level "+sk);
+  const blurb=RANK_BLURB[sk]||"";
+  const act=s.last_action?ACT[s.last_action]:null;
+  const w=WEAPONS[s.player_weapon];
+  const hp=s.player_hp;
+  let line;
+  if(act)line=`JEV is <b>${act}</b> — current rank: <b>${rank}</b> (${sk}/4), ${blurb}.`;
+  else line=`JEV is hunting you — current rank: <b>${rank}</b> (${sk}/4), ${blurb}.`;
+  let bits=[];
+  if(w)bits.push(`you hold the <b>${w}</b>`);
+  if(typeof hp==="number")bits.push(`your HP <b>${hp}</b>`);
+  if(bits.length)line+="  "+bits.join(" · ")+".";
+  el.innerHTML=line;
+  // XP bar: damage YOU dealt jev since his last rank-up (the engine counts it).
+  const xp=(typeof s.buddy_xp==="number")?s.buddy_xp:0;
+  const nxt=(typeof s.buddy_xp_next==="number")?s.buddy_xp_next:100;
+  const bar=$("xpbar"),txt=$("xptext");
+  if(sk>=LEVELS.length-1){
+    bar.style.width="100%";bar.classList.add("max");
+    txt.textContent=`MAX RANK — ${LEVELS[LEVELS.length-1]}. Nothing left to teach him.`;
+  }else{
+    bar.style.width=Math.min(100,100*xp/nxt)+"%";bar.classList.remove("max");
+    txt.textContent=`next rank in ${xp} / ${nxt} XP — XP is the damage you deal him`;
+  }
 }
 function render(s){
   if(!s||!s.ts){$("status").innerHTML='<span class="pulse"></span>waiting for first snapshot…';return;}
@@ -349,15 +437,17 @@ function render(s){
   $("rsub").style.color=s.last_terminal_r>=0?"var(--gr)":"var(--rd)";
   $("hp").textContent=s.player_hp??"–";
   $("hp").className="big "+((s.player_hp??100)>60?"ok":(s.player_hp??100)>25?"warn":"bad");
-  $("act").textContent="act: "+(s.last_action??"–");
+  const w=WEAPONS[s.player_weapon];
+  $("act").textContent=(w?"you: "+w+" · ":"")+"act: "+(s.last_action??"–");
   if(typeof s.buddy_skill==="number")drawSkill(s.buddy_skill);
   $("skpush").textContent=s.pushes?`${s.pushes} curriculum pushes`:"";
+  explain(s);
   drawHeat(s.rows||[]);
   const tick=$("tick");
   const evs=[...(s.agent_events||[]).map(x=>[x.ts,x.text]),
              ...(s.events||[]).map(x=>[s.ts,x])].slice(-24);
   tick.innerHTML=evs.slice().reverse().map(([ts,tx])=>
-    `<li class="${classify(tx)}"><span class="t">${new Date(ts*1000).toLocaleTimeString()} </span>${esc(tx)}</li>`).join("")
+    `<li class="${classify(tx)}"><span class="t">${new Date(ts*1000).toLocaleTimeString()} </span>${esc(plainify(tx))}</li>`).join("")
     ||'<li><span class="t">no events yet…</span></li>';
 }
 function renderHist(rows){
@@ -447,11 +537,12 @@ def make_handler(state: DashboardState):
     return Handler
 
 
-def start(live=None, port: int = 0):
+def start(live=None, port: int | None = None):
     """Start the dashboard server. Returns (httpd, url)."""
     state = DashboardState(live)
-    httpd = ThreadingHTTPServer(("127.0.0.1", port or config.DASHBOARD_PORT),
-                                make_handler(state))
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", config.DASHBOARD_PORT if port is None else port),
+        make_handler(state))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"

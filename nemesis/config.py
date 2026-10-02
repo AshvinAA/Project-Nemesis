@@ -31,9 +31,11 @@ EPSILON_DECAY_EPISODES = 30
 QTABLE_PATH = "nemesis/rl/qtable.json"
 
 # --- Phase 9: hostile-buddy skill curriculum -------------------------------
-SKILL_LEVELS = ("clueless", "recruit", "competent", "sharp", "veteran")
+SKILL_LEVELS = ("rookie", "amateur", "semi-pro", "professional", "legend")
 SKILL_MAX = 4
 SKILL_EPISODES_PER_LEVEL = 5   # trainer policy: +1 level per N completed episodes
+BUDDY_XP_PER_RANK = 100        # damage the buddy absorbs per auto-rank
+                               # (must mirror NEM_BUDDY_XP in files/p_nemesis.c)
 
 # --- Phase 9: dashboard ----------------------------------------------------
 LIVE_STATE_PATH = "nemesis/live_state.json"        # rewritten ~4 Hz for the UI

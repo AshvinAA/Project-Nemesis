@@ -59,12 +59,18 @@ void		NEM_DecayPass (void);
 // Apply one clamped proposal. Returns "ok" or a short error string.
 const char*	NEM_Propose (const char* type, const char* key, const char* value);
 
-// Phase 9: hostile-buddy skill curriculum (0=clueless .. 4=veteran).  Lives in
+// Phase 9: hostile-buddy skill curriculum (0=rookie .. 4=legend).  Lives in
 // the nemesis store: persisted in nemesis_memory.dat, serialized in observe.
 int		NEM_BuddySkill (void);
 void		NEM_SetBuddySkill (int level);
 // Auto-lesson: the hostile buddy killed the human -> ease off one step.
 void		NEM_NoteBuddyKillPlayer (void);
+// Phase 9.11: the hostile buddy absorbed `damage` from the human -> XP toward
+// its next rank (auto-promotion every NEM_BUDDY_XP points).  Also driven by
+// the director protocol (`buddy xp=N`) so tools can exercise the ladder.
+void		NEM_NoteBuddyDamage (int damage);
+// XP progress toward the next rank (0..99), serialized as buddy_xp.
+int		NEM_BuddyXP (void);
 
 // Persistence (nemesis_memory.dat sibling of buddydoom.cfg).
 void		NEM_Load (void);

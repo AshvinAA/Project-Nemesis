@@ -53,6 +53,10 @@ int  P_AICoop_HostileMode (void);
 int  P_AICoop_SetSkill (int level);
 int  P_AICoop_Skill (void);
 
+// Phase 9.11: rank name for a skill level -- the rookie -> amateur ->
+// semi-pro -> professional -> legend ladder (display vocabulary everywhere).
+const char* P_AICoop_SkillName (int level);
+
 // Phase 9.9: 1 Hz HUD line showing the buddy-skill curriculum level (display
 // only, rides the NEM_HUDPrint slot).
 void P_AICoop_SkillHud (void);
