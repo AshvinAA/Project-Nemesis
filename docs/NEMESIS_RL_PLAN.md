@@ -230,6 +230,22 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       (big "RANK UP — jev is now X" bloom, hero-panel glow, re-armable after an ease-off).
       Sparklines got gradient area fills. Tests extended (UI contract + scoreboard counter
       arithmetic + ring-replay tolerance).
+- [x] **9.17 "jev pulling the strings" parameter feed**: every learned variable jev changes lands
+      as a flat record `{ts, kind, type?, name?, old, new}` in a new LiveState `param_feed` (RAM
+      ring, 250 kept, newest-first 80 shipped in `/state`): tactic weights + weapon bias + per-type
+      deaths are DIFFED between consecutive 1 Hz history rows (`param_deltas()`, pure/shared),
+      while rank / xp / epsilon are compared every 10 Hz poll (XP visibly steps per shotgun hit).
+      First wt row is a baseline (diffs nothing); a key APPEARING counts as a change (old=null);
+      wt-diffs land in the feed BEFORE the snapshot publishes (no one-poll lag). Dashboard panel
+      "jev pulling the strings — every changed variable" lists them with plain-English why-lines
+      ("rewarded — that worked" / "punished — that backfired" / "promoted — your damage taught
+      him"), newest-first, change-counter, green flash on the newest row; file-replay mode re-derives
+      the same feed client-side (`paramDeltasFromRows`).
+- [x] **9.18 Side-by-side demo mode**: the game's default window is 640×400 (BASE_WIDTH/HEIGHT
+      320×200 × default `hires=2`; no override in buddydoom.cfg) — so `?compact=1` (or the
+      "side-by-side" link in the status bar, which toggles back and forth) squeezes the whole
+      console into one 660 px column: panels restack single-column, ladder/heatmap/tickers shrink,
+      string-feed capped at 216 px, foot hidden. Default wide layout untouched.
 
 ## 10. Phase 7 — Demo video **[ ]**
 
@@ -257,6 +273,7 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
 | D10 | Buddy auto-lesson scope | The shotgunguy-death promote NEVER fired (buddy is a bot player, not a row) — replaced in 9.12 by the XP ladder; kill-block demote now gated on the buddy actually being the killer | RESOLVED |
 | D11 | Ladder design (9.12) | XP = post-armor damage the HUMAN deals the buddy, 100/rank, pot persists, trainer `buddy skill=N` resets the pot, legend caps the pot at 99; buddy self-splash and monster damage don't count; demote only when the buddy kills the human | LOCKED |
 | D12 | Rank-up drama (9.15) | Fog ring + taunt + screen message + victory pause are DISPLAY-ONLY (no stat/stat-adjacent effect); taunt lumps pre-baked (taunt:0..3); demotes stay quiet | LOCKED |
+| D13 | Param feed + compact mode (9.17/9.18) | Feed = LiveState diff (1 Hz wt rows + 10 Hz rank/xp/eps polls), pure `param_deltas()` shared with the UI replay fallback; no engine changes. Compact = `?compact=1` opt-in 660 px column (game default window is 640×400); wide layout stays the default | LOCKED |
 
 ## 13. Run cheat sheet (from HANDOFF.md — verified)
 
@@ -308,6 +325,9 @@ python tools/ladder_test.py
 # Manual ladder poke (protocol): feed the buddy XP or set its rank directly
 #   buddy xp=60      (post-armor damage equivalent; 100 = +1 rank)
 #   buddy skill=2    (trainer takeover; resets the XP pot)
+
+# Dashboard side-by-side demo mode (660 px column beside the 640x400 game window)
+#   open http://127.0.0.1:8787/?compact=1   (or click "side-by-side" in the status bar)
 ```
 
 ---
@@ -415,3 +435,41 @@ python tools/ladder_test.py
 - Smoke-test gotcha (again): the engine is single-client — poking `buddy xp=` from a second socket silently lands nowhere; the probe must send pokes over the SAME link the dashboard loop owns.
 - Tests: test_dashboard extended (UI contract for ladder/scoreboard/flash + scoreboard arithmetic + ring-replay tolerance) → DASHBOARD PASS; selftest + phase2 PASS; full ladder_test.py run against the drama build → FULL PASS (12/12).
 - Files: BuddyDoom/files/{p_ai_coop.c,p_ai_coop.h,p_nemesis.c,p_inter.c}; nemesis/{livestate,dashboard,test_dashboard}.py; PLAN §9/§12 updated.
+
+**2026-10-06 — Phases 9.17–9.18 BUILT and live-verified (session 6): "jev pulling the strings" feed + side-by-side compact dashboard**
+- User request: show "how jev is pulling the strings each passing millisecond … how jev is altering a
+  certain variable each passing second", and shrink the dashboard "so that it fits right besides the
+  game window" for the demo.
+- **9.17 Param feed (Python-only; engine untouched):** `nemesis/livestate.py` gained `param_deltas()`
+  (pure wt-map diff → `{kind,type?,name?,old,new}` records; new keys count as changes with old=null)
+  plus a `param_feed` ring (250 kept; newest-first 80 in `/state`). Two cadences by design: tactic
+  weights / weapon bias / per-type deaths diff between consecutive 1 Hz history rows, while rank / xp
+  / epsilon are compared every 10 Hz poll — in the live smoke the feed showed XP stepping 29→39→69 in
+  5/10/15-damage chunks per pinky shotgun hit and rank flipping on every promote/ease, i.e. the
+  requested "each variable each second" view. First wt row is a BASELINE (arms, diffs nothing);
+  wt-diffs are appended BEFORE the snapshot publishes (first draft froze `param_feed` into the
+  snapshot before the diff ran — every wt change showed one poll late; caught by the new tests).
+- **9.17 Dashboard panel:** full-width "jev pulling the strings — every changed variable" list under
+  the hero: newest-first rows `time variable old → new` with plain-English why-lines ("rewarded —
+  that worked" / "punished — that backfired" / "promoted — your damage taught him" / "eased off — he
+  killed you" / "the squad paid to learn that"), a change counter, a green flash on the newest row,
+  and jev's own "deaths" shown as "jev himself". File-replay mode re-derives the identical feed
+  client-side (`paramDeltasFromRows`) since old /state files have no `param_feed` key.
+- **9.18 Compact mode:** measured the game window from source — `BASE_WIDTH×BASE_HEIGHT = 320×200`
+  (doomdef.h) × default `hires=2` (doomdef.c, no override in buddydoom.cfg) = **640×400**.
+  `?compact=1` (or the "side-by-side" status-bar link, toggles both ways) adds `body.compact` + a
+  stylesheet that restacks every panel into one **660 px** column: hero/ladder/heatmap/scoreboard/
+  charts shrink to fit, string-feed capped 216 px, foot hidden. Wide default untouched.
+- **Tests:** test_dashboard extended — `param_deltas()` purity (exact moves, no no-ops, [] on equal
+  maps), live-feed contract (tactic/bias/deaths/rank/xp/eps records with values; unchanged obs grow
+  nothing; pinned epsilon must NOT read as a move), UI contract (strings panel, dfeed/dcount,
+  showDelta/deltaLine, replay fallback, compact 660 px + toggle) → **DASHBOARD PASS**; selftest +
+  phase2 PASS.
+- **Live smoke:** fresh game (focused) + detached `python -m nemesis.dashboard --live`: engine ↔
+  dashboard ESTABLISHED on :31666, tic 277→2125 while serving, feed armed (0 records on first sight
+  = correct baseline) and streamed 60 records of a real human-vs-jev duel before the game window was
+  closed by the user mid-session (clean exit, no new crash dump — navdbg still the Sep 25 artifact).
+  Note: with a casual pinky duel the ladder thrashes (19 rankups / 20 eases in ~2 min: 100 XP is ~5
+  pinky hits and each player death easess one rank) — the feed makes the economics visible; if the
+  demo wants steadier drama, raise NEM_BUDDY_XP (D11) later.
+- Files: nemesis/{livestate,dashboard,test_dashboard}.py; PLAN §9/§12/§13/§14. No C changes, no rebuild.

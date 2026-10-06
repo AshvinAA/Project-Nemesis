@@ -1,54 +1,4 @@
-"""Phase 9: the weight-evolution dashboard ("watch jev get smart").
-
-Zero dependencies: stdlib http.server + one embedded HTML page (dark theme,
-vanilla JS).  Endpoints:
-    /         -> the console
-    /state    -> live snapshot (same JSON the agent writes to live_state.json)
-    /history  -> tail of the 1 Hz history rows (sparkline + drift fuel)
-
-Runs three ways:
-  * wired into the agent  — rl_agent.run() starts it with the in-RAM
-    LiveState, so it always serves the freshest snapshot;
-  * standalone (files)    — `python -m nemesis.dashboard` reads the files off
-    disk (inspect a past session while the agent is down);
-  * standalone (--live)   — `python -m nemesis.dashboard --live` CONNECTS to
-    the engine itself (observe-only, never sends orders) and drives the
-    snapshot live, so the dashboard runs alongside a plain game session with
-    no agent.  The engine accepts exactly ONE client: use --live only when
-    the agent is NOT running.
-
-Phase 9.17: the "jev pulling the strings" feed — /state carries param_feed,
-the list of every learned variable jev changed (tactic weights, weapon
-bias, per-type deaths, rank, XP, epsilon), newest first.
-Phase 9.18: side-by-side demo mode — `?compact=1` (or the link in the
-status bar) squeezes the console to a single ~660 px column so it sits
-beside the game's default 640x400 window.
-"""
-
-from __future__ import annotations
-
-import json
-import os
-import threading
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-from . import config
-
-HISTORY_TAIL = 900  # rows sent to the UI (~15 min at 1 Hz)
-
-# The 8-order vocabulary (p_nemesis.c NEM_OrderIndex) — heatmap columns.
-ORDER_KEYS = ["chase", "hold", "fallback", "flank_left", "flank_right",
-              "ambush", "focus_fire", "use_door"]
-
-# One color per order, shared by the heatmap accents and the drift chart.
-ORDER_COLORS = {
-    "chase": "#22d3ee", "hold": "#34d399", "fallback": "#f87171",
-    "flank_left": "#fbbf24", "flank_right": "#fb923c", "ambush": "#a78bfa",
-    "focus_fire": "#f472b6", "use_door": "#94a3b8",
-}
-
-_PAGE = r"""<!doctype html>
+<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NEMESIS — weight evolution console</title>
@@ -179,7 +129,7 @@ ul.tick li.demote{color:var(--am)}
 #dfeed li.fresh{animation:dfin 1.6s ease}
 @keyframes dfin{0%{background:#22d3ee33}100%{background:transparent}}
 #dcount{color:var(--cy);letter-spacing:0;text-transform:none}
-</style></head><body class="__QS__"><div class="wrap">
+</style></head><body class=""><div class="wrap">
 <div class="bar">
   <h1>Nemesis <span class="sub">// weight-evolution console — watching the jev learn</span></h1>
   <div class="status" id="status"><span class="pulse"></span>connecting… · <span id="qsline"></span> · <a href="?compact=1" id="qstoggle" title="shrink the console to sit beside the game window (demo side-by-side)">side-by-side</a></div>
@@ -244,9 +194,9 @@ ul.tick li.demote{color:var(--am)}
 </div>
 <script>
 "use strict";
-const ORDERS=__ORDERS__;
-const LEVELS=__LEVELS__;
-const OCOLORS=__OCOLORS__;
+const ORDERS=["chase", "hold", "fallback", "flank_left", "flank_right", "ambush", "focus_fire", "use_door"];
+const LEVELS=["rookie", "amateur", "semi-pro", "professional", "legend"];
+const OCOLORS={"chase": "#22d3ee", "hold": "#34d399", "fallback": "#f87171", "flank_left": "#fbbf24", "flank_right": "#fb923c", "ambush": "#a78bfa", "focus_fire": "#f472b6", "use_door": "#94a3b8"};
 const WEAPONS=["fist","pistol","shotgun","chaingun","rocket","plasma","bfg","chainsaw","ssg"];
 const NICE={zombie:"zombie man",shotgun:"shotgun guy",chaingun:"chaingunner",imp:"imp",
   pinky:"pinky",spectre:"spectre",lost:"lost soul",caco:"cacodemon",pain:"pain elemental",
@@ -704,170 +654,4 @@ document.addEventListener("click",e=>{
 });
 poll();pollHist();scanRankups([]);
 setInterval(poll,250);setInterval(pollHist,1000);
-</script></body></html>"""
-
-
-class DashboardState:
-    """Shared state the HTTP handlers read from (RAM snapshot or disk)."""
-
-    def __init__(self, live=None) -> None:
-        self.live = live  # nemesis.livestate.LiveState or None
-
-    def state_json(self) -> dict:
-        if self.live is not None and self.live.snapshot:
-            return self.live.snapshot
-        try:
-            with open(config.LIVE_STATE_PATH, encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
-
-    def history_rows(self) -> list:
-        if self.live is not None:
-            return list(self.live.history)
-        rows = []
-        try:
-            with open(config.STATE_HISTORY_PATH, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            rows.append(json.loads(line))
-                        except ValueError:
-                            pass
-        except OSError:
-            pass
-        return rows[-HISTORY_TAIL:]
-
-
-def make_handler(state: DashboardState):
-    page = (_PAGE
-            .replace("__ORDERS__", json.dumps(ORDER_KEYS))
-            .replace("__LEVELS__", json.dumps(list(config.SKILL_LEVELS)))
-            .replace("__OCOLORS__", json.dumps(ORDER_COLORS))
-            .replace("__QS__", ""))  # body class; ?compact=1 adds it client-side
-
-    class Handler(BaseHTTPRequestHandler):
-        def _send(self, code: int, body: bytes, ctype: str) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self) -> None:
-            if self.path == "/state":
-                body = json.dumps(state.state_json()).encode("utf-8")
-                self._send(200, body, "application/json")
-            elif self.path == "/history":
-                body = json.dumps({"rows": state.history_rows()}).encode("utf-8")
-                self._send(200, body, "application/json")
-            else:
-                self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
-
-        def log_message(self, fmt, *args) -> None:  # silence request spam
-            pass
-
-    return Handler
-
-
-def start(live=None, port: int | None = None):
-    """Start the dashboard server. Returns (httpd, url)."""
-    state = DashboardState(live)
-    httpd = ThreadingHTTPServer(
-        ("127.0.0.1", config.DASHBOARD_PORT if port is None else port),
-        make_handler(state))
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
-
-
-class _LiveShim:
-    """Observe-only stand-in for LiveLearner so --live can feed LiveState
-    without an agent (no orders, no spawns, no Q updates — just watching)."""
-
-    class _Q:
-        episode = 0
-
-        @staticmethod
-        def epsilon():
-            return config.EPSILON_START
-
-    def __init__(self) -> None:
-        self.q = self._Q()
-        self.epsilon_override = None
-        self.alive = False
-        self.rewards_log: list[float] = []
-        self.prev_hp = None
-        self.last_action_name = None
-
-    def episode_label(self) -> int:
-        return self.q.episode
-
-    def _surv_avg(self) -> float:
-        return 0.0
-
-
-def live_loop(live, engine_port=None, max_seconds: float | None = None) -> None:
-    """--live: connect to the engine as the ONE client, poll observe, feed
-    the dashboard.  Watch-only: nothing is ever sent but `observe`."""
-    from .engine import DirectorLink
-    from .curriculum import SkillCurriculum
-
-    shim = _LiveShim()
-    curriculum = SkillCurriculum(DirectorLink(port=engine_port or config.DIRECTOR_PORT))
-    link = curriculum.link
-    deadline = time.monotonic() + max_seconds if max_seconds else None
-    print(f"[dashboard] live mode: watching the engine on :{link.port} "
-          "(observe-only; the agent must NOT be running)")
-    while deadline is None or time.monotonic() < deadline:
-        if not link.ensure_connected():
-            time.sleep(config.RECONNECT_DELAY)
-            continue
-        obs = link.observe()
-        if obs is None or obs.get("nolevel"):
-            time.sleep(config.POLL_PERIOD)
-            continue
-        curriculum.reconcile(obs.get("nemesis", {}).get("buddy_skill"))
-        live.update(shim, obs, curriculum)
-        time.sleep(config.POLL_PERIOD)
-
-
-def main() -> int:
-    import argparse
-    ap = argparse.ArgumentParser(
-        description="Nemesis dashboard (standalone: reads files, or --live to watch the engine)")
-    ap.add_argument("--port", type=int, default=config.DASHBOARD_PORT)
-    ap.add_argument("--live", action="store_true",
-                    help="connect to the engine and stream live snapshots "
-                         "(observe-only; exclusive with the agent)")
-    ap.add_argument("--max-seconds", type=float, default=None)
-    args = ap.parse_args()
-
-    if args.live:
-        from .livestate import LiveState
-        live = LiveState()
-        httpd, url = start(live=live, port=args.port)
-        print(f"[dashboard] serving {url}")
-        try:
-            live_loop(live, max_seconds=args.max_seconds)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            httpd.shutdown()
-        return 0
-
-    httpd, url = start(live=None, port=args.port)
-    print(f"[dashboard] serving {url}  (reads {config.LIVE_STATE_PATH} + history)")
-    print("[dashboard] Ctrl+C to stop")
-    try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        httpd.shutdown()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+</script></body></html>
