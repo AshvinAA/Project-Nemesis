@@ -23,6 +23,13 @@ bias, per-type deaths, rank, XP, epsilon), newest first.
 Phase 9.18: side-by-side demo mode — `?compact=1` (or the link in the
 status bar) squeezes the console to a single ~660 px column so it sits
 beside the game's default 640x400 window.
+Phase 9.19: "DOCUMENTS" restyle — the console is now a phosphor-green
+query terminal. Every learned variable renders as a bracketed question
+document ([FIRING] [GOAL] [DODGE] [MOVEMENT]) whose rows are animated
+bar meters fed straight from /state (tactic weights, weapon bias, XP,
+rank, epsilon, deaths) — you literally watch jev move his numbers, and
+a changed variable glows its document. The top block mirrors the
+terminal chrome: a `> standing order` line and a DIRECTOR status row.
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ ORDER_KEYS = ["chase", "hold", "fallback", "flank_left", "flank_right",
 
 # One color per order, shared by the heatmap accents and the drift chart.
 ORDER_COLORS = {
-    "chase": "#22d3ee", "hold": "#34d399", "fallback": "#f87171",
+    "chase": "#46ff7d", "hold": "#34d399", "fallback": "#f87171",
     "flank_left": "#fbbf24", "flank_right": "#fb923c", "ambush": "#a78bfa",
     "focus_fire": "#f472b6", "use_door": "#94a3b8",
 }
@@ -54,16 +61,16 @@ _PAGE = r"""<!doctype html>
 <title>NEMESIS — weight evolution console</title>
 <style>
 :root{
-  --bg:#07090f; --panel:#0e1420; --panel2:#131b2b; --line:#1d2940;
-  --txt:#c9d6e8; --dim:#5c6f8f; --cy:#22d3ee; --gr:#34d399; --rd:#f87171;
-  --am:#fbbf24; --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
+  --bg:#040805; --panel:#0a130d; --panel2:#0d1a10; --line:#1c3a26;
+  --txt:#a8e6b8; --dim:#4e8a63; --cy:#46ff7d; --gr:#46ff7d; --rd:#ff5d5d;
+  --am:#a5ffc6; --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:radial-gradient(1200px 600px at 70% -10%,#0d1a2e 0%,var(--bg) 60%);
+body{background:radial-gradient(1200px 600px at 70% -10%,#08150c 0%,var(--bg) 60%);
   color:var(--txt);font-family:var(--mono);min-height:100vh;padding:18px}
 a{color:var(--cy)}
 h1{font-size:15px;letter-spacing:3px;color:var(--cy);text-transform:uppercase;
-  text-shadow:0 0 18px #22d3ee44}
+  text-shadow:0 0 18px #46ff7d44}
 h1 .sub{color:var(--dim);letter-spacing:1px;text-transform:none;font-size:11px}
 .wrap{max-width:1180px;margin:0 auto}
 .bar{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
@@ -73,33 +80,33 @@ h1 .sub{color:var(--dim);letter-spacing:1px;text-transform:none;font-size:11px}
   box-shadow:0 0 0 1px #000 inset,0 8px 24px #0008}
 .panel h2{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;
   margin-bottom:10px;display:flex;justify-content:space-between}
-.panel h2 .r{color:#31415e;letter-spacing:0;text-transform:none}
+.panel h2 .r{color:#3d6b4c;letter-spacing:0;text-transform:none}
 .c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}
 .c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
-.big{font-size:30px;font-weight:700;color:#eaf4ff;line-height:1.1}
+.big{font-size:30px;font-weight:700;color:#e2ffe9;line-height:1.1}
 .big .u{font-size:12px;color:var(--dim)}
 .gauges{display:flex;gap:10px;flex-wrap:wrap}
-.gauge{flex:1;min-width:110px;text-align:center;background:#0a101c;border:1px solid var(--line);
+.gauge{flex:1;min-width:110px;text-align:center;background:#081209;border:1px solid var(--line);
   border-radius:8px;padding:10px 6px}
-.gauge .v{font-size:22px;font-weight:700;color:#eaf4ff}
+.gauge .v{font-size:22px;font-weight:700;color:#e2ffe9}
 .gauge .l{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:3px}
 .gauge.ok .v{color:var(--gr)}.gauge.warn .v{color:var(--am)}.gauge.bad .v{color:var(--rd)}
 /* skill meter */
 .meter{display:flex;gap:6px;margin-top:6px}
-.seg{flex:1;height:16px;border-radius:4px;background:#0a101c;border:1px solid var(--line);
+.seg{flex:1;height:16px;border-radius:4px;background:#081209;border:1px solid var(--line);
   position:relative;overflow:hidden}
-.seg.on{background:linear-gradient(90deg,#0ea5b7,#22d3ee);border-color:#22d3ee;
-  box-shadow:0 0 12px #22d3ee66}
+.seg.on{background:linear-gradient(90deg,#0f8a3d,#46ff7d);border-color:#46ff7d;
+  box-shadow:0 0 12px #46ff7d66}
 .mlabels{display:flex;gap:6px;margin-top:4px}
 .mlabels span{flex:1;text-align:center;font-size:9px;letter-spacing:1px;color:var(--dim)}
-.mlabels span.cur{color:var(--cy);text-shadow:0 0 8px #22d3ee88}
+.mlabels span.cur{color:var(--cy);text-shadow:0 0 8px #46ff7d88}
 /* heatmap */
 table.heat{border-collapse:separate;border-spacing:4px;width:100%;display:block;overflow-x:auto}
 table.heat th{font-size:9px;color:var(--dim);letter-spacing:1px;padding:2px 4px;text-align:center}
 table.heat td.type{font-size:11px;color:var(--txt);text-align:left;white-space:nowrap;padding-right:8px}
 table.heat td.cell{min-width:64px;height:30px;border-radius:5px;text-align:center;
-  font-size:11px;color:#eaf4ff;border:1px solid #0006;text-shadow:0 1px 2px #000c}
-table.heat td.cell.na{background:#0a101c;color:#31415e;border-style:dashed}
+  font-size:11px;color:#e2ffe9;border:1px solid #0006;text-shadow:0 1px 2px #000c}
+table.heat td.cell.na{background:#081209;color:#3d6b4c;border-style:dashed}
 .legend{display:flex;gap:14px;margin-top:8px;font-size:9px;color:var(--dim);align-items:center;flex-wrap:wrap}
 .chip{width:14px;height:10px;border-radius:3px;display:inline-block;vertical-align:middle}
 .deaths{font-size:11px;color:var(--dim)}
@@ -113,7 +120,7 @@ table.heat td.cell.na{background:#0a101c;color:#31415e;border-style:dashed}
 .leg .chip{width:10px;height:10px}
 /* ticker */
 ul.tick{list-style:none;max-height:230px;overflow:hidden}
-ul.tick li{font-size:10.5px;padding:4px 6px;border-bottom:1px dashed #16223a;white-space:nowrap;
+ul.tick li{font-size:10.5px;padding:4px 6px;border-bottom:1px dashed #14291b;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 ul.tick li .t{color:var(--dim)}
 ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.spawn{color:var(--cy)}
@@ -122,110 +129,165 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
 @keyframes pu{0%,100%{opacity:.25}50%{opacity:1}}
 .ok .pulse{background:var(--gr);box-shadow:0 0 10px var(--gr)}
 .status{font-size:11px;color:var(--dim)}
-.foot{margin-top:12px;font-size:10px;color:#31415e;text-align:center;letter-spacing:1px}
+.foot{margin-top:12px;font-size:10px;color:#3d6b4c;text-align:center;letter-spacing:1px}
 .wbline{font-size:11px;color:var(--dim);white-space:pre-line;line-height:1.7}
 .wbline b{color:var(--am)}
 /* Phase 9.13: plain-English explainer + XP bar */
-.explain-big{font-size:17px;line-height:1.5;color:#eaf4ff;margin:2px 0 8px}
-.explain-big b{color:var(--cy);text-shadow:0 0 10px #22d3ee44}
+.explain-big{font-size:17px;line-height:1.5;color:#e2ffe9;margin:2px 0 8px}
+.explain-big b{color:var(--cy);text-shadow:0 0 10px #46ff7d44}
 .explain-sub{font-size:11px;color:var(--dim);line-height:1.65}
-.xpwrap{position:relative;height:20px;background:#0a101c;border:1px solid var(--line);
+.xpwrap{position:relative;height:20px;background:#081209;border:1px solid var(--line);
   border-radius:6px;margin-top:10px;overflow:hidden}
-.xpbar{height:100%;width:0;background:linear-gradient(90deg,#0ea5b7,#22d3ee);
-  box-shadow:0 0 14px #22d3ee66;transition:width .45s ease}
+.xpbar{height:100%;width:0;background:linear-gradient(90deg,#0f8a3d,#46ff7d);
+  box-shadow:0 0 14px #46ff7d66;transition:width .45s ease}
 .xpbar.max{background:linear-gradient(90deg,#fbbf24,#f472b6);box-shadow:0 0 14px #fbbf2466}
 .xptext{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  font-size:10px;color:#eaf4ff;text-shadow:0 1px 2px #000;letter-spacing:1px}
+  font-size:10px;color:#e2ffe9;text-shadow:0 1px 2px #000;letter-spacing:1px}
 ul.tick li.demote{color:var(--am)}
 .seg.cur{animation:segp 1.6s ease-in-out infinite}
-@keyframes segp{0%,100%{box-shadow:0 0 6px #22d3ee44}50%{box-shadow:0 0 18px #22d3eecc}}
+@keyframes segp{0%,100%{box-shadow:0 0 6px #46ff7d44}50%{box-shadow:0 0 18px #46ff7dcc}}
 /* Phase 9.16: hero ladder stepper, scoreboard, rank-up flash */
 .ladder{display:flex;align-items:center;margin:14px 2px 2px}
 .lnode{display:flex;flex-direction:column;align-items:center;gap:5px;flex:0 0 auto;width:88px}
-.ldot{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);background:#0a101c;
-  display:flex;align-items:center;justify-content:center;font-size:11px;color:#31415e;font-weight:700}
-.lnode.done .ldot{border-color:var(--cy);color:var(--cy);box-shadow:0 0 10px #22d3ee44}
-.lnode.cur .ldot{border-color:var(--cy);background:linear-gradient(180deg,#0ea5b7,#22d3ee);
-  color:#03202b;animation:dotp 1.4s ease-in-out infinite}
+.ldot{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);background:#081209;
+  display:flex;align-items:center;justify-content:center;font-size:11px;color:#3d6b4c;font-weight:700}
+.lnode.done .ldot{border-color:var(--cy);color:var(--cy);box-shadow:0 0 10px #46ff7d44}
+.lnode.cur .ldot{border-color:var(--cy);background:linear-gradient(180deg,#0f8a3d,#46ff7d);
+  color:#032b12;animation:dotp 1.4s ease-in-out infinite}
 .lname{font-size:9px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;text-align:center}
-.lnode.cur .lname{color:var(--cy);text-shadow:0 0 8px #22d3ee88}
-.lnode.done .lname{color:#8fd8e8}
+.lnode.cur .lname{color:var(--cy);text-shadow:0 0 8px #46ff7d88}
+.lnode.done .lname{color:#9fe8b0}
 .lbar{flex:1;height:2px;background:var(--line);margin:0 -8px 18px;position:relative;overflow:hidden}
 .lbar.done::after{content:"";position:absolute;inset:0;
-  background:linear-gradient(90deg,#0ea5b7,#22d3ee);animation:fillx .8s ease}
-@keyframes dotp{0%,100%{box-shadow:0 0 6px #22d3ee55}50%{box-shadow:0 0 24px #22d3eedd}}
+  background:linear-gradient(90deg,#0f8a3d,#46ff7d);animation:fillx .8s ease}
+@keyframes dotp{0%,100%{box-shadow:0 0 6px #46ff7d55}50%{box-shadow:0 0 24px #46ff7ddd}}
 @keyframes fillx{from{width:0}to{width:100%}}
 .sb{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.sb .tile{background:#0a101c;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
-.sb .tile .v{font-size:20px;font-weight:700;color:#eaf4ff;line-height:1.1}
+.sb .tile{background:#081209;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.sb .tile .v{font-size:20px;font-weight:700;color:#e2ffe9;line-height:1.1}
 .sb .tile .l{font-size:9px;color:var(--dim);letter-spacing:.5px;margin-top:3px;line-height:1.4}
 .sb .tile.hot{border-color:#fbbf2455}.sb .tile.hot .v{color:var(--am)}
 .flashscreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
   pointer-events:none;opacity:0;z-index:50}
 .flashscreen.go{animation:bigflash 1.9s ease}
 .flashscreen .txt{font-size:46px;letter-spacing:8px;font-weight:700;color:var(--cy);
-  text-shadow:0 0 30px #22d3ee,0 0 90px #22d3ee88}
-.flashscreen .sub{font-size:16px;letter-spacing:3px;color:#8fd8e8;text-align:center;margin-top:8px}
+  text-shadow:0 0 30px #46ff7d,0 0 90px #46ff7d88}
+.flashscreen .sub{font-size:16px;letter-spacing:3px;color:#9fe8b0;text-align:center;margin-top:8px}
 @keyframes bigflash{0%{opacity:0}12%{opacity:1}70%{opacity:.85}100%{opacity:0}}
 #hero.flash{animation:heroflash 1.9s ease}
 @keyframes heroflash{0%,100%{box-shadow:0 0 0 1px #000 inset,0 8px 24px #0008}
-  30%{box-shadow:0 0 0 2px #22d3ee inset,0 0 70px #22d3ee66}}
+  30%{box-shadow:0 0 0 2px #46ff7d inset,0 0 70px #46ff7d66}}
+/* Phase 9.19: query-document panels + phosphor bar meters */
+.docname{font-size:9px;letter-spacing:3px;color:var(--dim);margin:4px 2px 8px;text-transform:uppercase}
+.dochead{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:4px 2px 8px;border-bottom:1px solid var(--line);margin-bottom:10px;line-height:1.5}
+.dochead .tag{color:var(--cy);font-weight:700;letter-spacing:1px;white-space:nowrap}
+.dochead .q{color:#79d998}
+.dochead .r{color:#3d6b4c;font-size:10px;white-space:nowrap}
+.qrow{display:grid;grid-template-columns:120px 1fr 60px;gap:10px;align-items:center;padding:4px 2px;font-size:11px}
+.qrow .qlabel{color:#7ddb95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qrow .qbar{height:12px;background:#081209;border:1px solid #14301d;position:relative;overflow:hidden}
+.qrow .qfill{height:100%;width:0;background:linear-gradient(90deg,#0f8a3d,#46ff7d);
+  box-shadow:0 0 10px #46ff7d55;transition:width .5s ease}
+.qrow .qval{text-align:right;color:#d9ffe4;font-size:10px}
+.doc.fresh{animation:docglow 1.4s ease}
+@keyframes docglow{0%{box-shadow:0 0 0 1px #46ff7d inset,0 0 26px #46ff7d33}
+  100%{box-shadow:0 0 0 1px #000 inset,0 8px 24px #0008}}
+.orderline{font-size:12px;color:#c9ffdb;padding:7px 10px;border:1px solid var(--line);
+  background:#081209;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.orderline .cur{width:9px;height:14px;background:var(--cy);animation:blink 1.1s steps(1) infinite;flex:0 0 auto}
+@keyframes blink{50%{opacity:0}}
+.director{font-size:10px;letter-spacing:1px;color:var(--dim);display:flex;gap:16px;
+  padding:2px 2px 8px;border-bottom:1px dashed var(--line);margin-bottom:10px;flex-wrap:wrap}
+.director b{color:#d9ffe4;font-weight:700}
 /* Phase 9.18: "jev pulling the strings" — parameter-change feed */
 #dfeed{max-height:330px;overflow:hidden}
 #dfeed li{display:flex;gap:6px;align-items:baseline}
 #dfeed li b{color:var(--am)}
 #dfeed li i{color:var(--dim);font-style:normal;font-size:9px}
-#dfeed li.empty{color:#31415e}
+#dfeed li.empty{color:#3d6b4c}
 #dfeed li.fresh{animation:dfin 1.6s ease}
-@keyframes dfin{0%{background:#22d3ee33}100%{background:transparent}}
+@keyframes dfin{0%{background:#46ff7d33}100%{background:transparent}}
 #dcount{color:var(--cy);letter-spacing:0;text-transform:none}
 </style></head><body class="__QS__"><div class="wrap">
 <div class="bar">
-  <h1>Nemesis <span class="sub">// weight-evolution console — watching the jev learn</span></h1>
+  <h1>Nemesis <span class="sub">// DOCUMENTS — every variable jev is pulling right now</span></h1>
   <div class="status" id="status"><span class="pulse"></span>connecting… · <span id="qsline"></span> · <a href="?compact=1" id="qstoggle" title="shrink the console to sit beside the game window (demo side-by-side)">side-by-side</a></div>
 </div>
 <div class="grid">
-  <div class="panel c3" title="How many training episodes the nemesis squad has finished. One episode = jev spawns, fights, and dies (or you die). More episodes = more learning."><h2>Episode</h2><div class="big" id="ep">–</div>
-    <div style="font-size:10px;color:var(--dim);margin-top:4px" id="epsub">waiting for agent</div></div>
-  <div class="panel c3" title="Epsilon is the share of decisions jev makes at random. High = still experimenting. Low = using what it learned. It only goes down over time."><h2>Epsilon (chaos)</h2><div class="big" id="eps">–</div>
-    <div style="font-size:10px;color:var(--dim);margin-top:4px" id="epssub">explore vs exploit</div></div>
-  <div class="panel c3" title="Average number of seconds the nemesis stays alive per episode. Should climb as it gets smarter."><h2>Survival avg</h2><div class="big" id="surv">–<span class="u"> s</span></div>
-    <div style="font-size:10px;color:var(--dim);margin-top:4px" id="rsub">last terminal: –</div></div>
-  <div class="panel c3" title="Your current health, and the weapon you are holding. In hostile training mode you spawn with a shotgun."><h2>Player HP</h2><div class="big" id="hp">–</div>
-    <div style="font-size:10px;color:var(--dim);margin-top:4px" id="act">act: –</div></div>
-
-  <div class="panel c12" id="hero" title="One sentence a normal person can read: what jev is doing this second, what rank he is, and what will move him up or down the ladder.">
-    <h2>What is jev doing right now? <span class="r" id="skpush"></span></h2>
+  <div class="panel c12 doc" id="hero" title="One sentence a normal person can read: what jev is doing this second, what rank he is, and what will move him up or down the ladder.">
+    <div class="dochead"><span class="tag">[INTENT]</span><span class="q">What is jev doing right now?</span><span class="r" id="skpush" style="margin-left:auto"></span></div>
+    <div class="orderline"><span>&gt; standing order: <span id="qsorder">awaiting first snapshot…</span></span><span class="cur"></span></div>
+    <div class="director"><span>DIRECTOR <b id="dir_tic">–</b></span><span>SPANKED <b id="dir_hits">0</b></span><span>KILLED <b id="dir_kills">0</b></span><span>RANK <b id="dir_rank">–</b></span></div>
     <div class="explain-big" id="explain">waiting for the engine…</div>
+    <div class="gauges" style="margin-top:10px">
+      <div class="gauge" title="How many training episodes the nemesis squad has finished. One episode = jev spawns, fights, and dies (or you die). More episodes = more learning."><div class="v" id="ep">–</div><div class="l">EPISODE</div><div class="l" id="epsub">waiting for agent</div></div>
+      <div class="gauge" title="Epsilon is the share of decisions jev makes at random. High = still experimenting. Low = using what it learned. It only goes down over time."><div class="v" id="eps">–</div><div class="l">EPSILON</div><div class="l" id="epssub">explore vs exploit</div></div>
+      <div class="gauge" title="Average number of seconds the nemesis stays alive per episode. Should climb as it gets smarter."><div class="v" id="surv">–<span class="u"> s</span></div><div class="l">SURVIVAL</div><div class="l" id="rsub">last terminal: –</div></div>
+      <div class="gauge" title="Your current health, and the weapon you are holding. In hostile training mode you spawn with a shotgun."><div class="v" id="hp">–</div><div class="l">PLAYER HP</div><div class="l" id="act">act: –</div></div>
+    </div>
     <div class="ladder" id="ladder"></div>
     <div class="explain-sub" id="explain2" style="margin-top:10px">the training duel: jev hunts you, you rough him up — every 100 damage he absorbs promotes him one rank; if he kills you, he eases off one rank</div>
     <div class="xpwrap" title="XP = the damage YOU have dealt jev since his last rank-up. Fill the bar and he promotes."><div class="xpbar" id="xpbar"></div><span class="xptext" id="xptext"></span></div>
   </div>
 
-  <div class="panel c12" id="strings" title="Live feed of every variable jev changes: tactic weights and weapon bias (diffed every second), plus rank, XP and epsilon (checked 10x per second). This is the learning, listed line by line as it happens.">
-    <h2>jev pulling the strings — every changed variable <span class="r"><span id="dcount">0 changes</span></span></h2>
-    <ul class="tick" id="dfeed"><li class="empty">no changes yet — fight jev and his numbers start moving</li></ul>
+  <div class="docname">DOCUMENTS — every variable jev is pulling, live</div>
+
+  <div class="panel c6 doc" id="doc_fire" title="Shooting-pressure weights: focus_fire, chase and hold, averaged over the squad, plus how scared the nemesis is of your shotgun. Bars glide whenever jev re-tunes a weight.">
+    <div class="dochead"><span class="tag">[FIRING]</span><span class="q">Should the trigger be held down right now?</span></div>
+    <div class="qrow"><span class="qlabel">hold_fire</span><div class="qbar"><div class="qfill" id="qb_focus_fire"></div></div><span class="qval" id="qv_focus_fire">–</span></div>
+    <div class="qrow"><span class="qlabel">press_chase</span><div class="qbar"><div class="qfill" id="qb_chase"></div></div><span class="qval" id="qv_chase">–</span></div>
+    <div class="qrow"><span class="qlabel">hold_ground</span><div class="qbar"><div class="qfill" id="qb_hold"></div></div><span class="qval" id="qv_hold">–</span></div>
+    <div class="qrow"><span class="qlabel">fear_shotgun</span><div class="qbar"><div class="qfill" id="qb_bias_sg"></div></div><span class="qval" id="qv_bias_sg">–</span></div>
   </div>
 
-  <div class="panel c4" title="This session's scoreboard: what you and jev have done to each other since the dashboard connected."><h2>Scoreboard <span class="r" id="sbtime"></span></h2>
-    <div class="sb" id="sb"><div class="tile"><div class="v">–</div><div class="l">waiting for the engine…</div></div></div>
+  <div class="panel c6 doc" id="doc_goal" title="The goal document: XP banked toward the next rank, the rank itself, epsilon (jev's randomness) and the session toll. Rank and XP move the instant you hit him or he dies.">
+    <div class="dochead"><span class="tag">[GOAL]</span><span class="q">Considering player, enemies, and items, what is the highest-priority goal right now?</span></div>
+    <div class="qrow"><span class="qlabel">xp_to_rank</span><div class="qbar"><div class="qfill" id="qb_xp"></div></div><span class="qval" id="qv_xp">–</span></div>
+    <div class="qrow"><span class="qlabel">rank</span><div class="qbar"><div class="qfill" id="qb_rank"></div></div><span class="qval" id="qv_rank">–</span></div>
+    <div class="qrow"><span class="qlabel">epsilon</span><div class="qbar"><div class="qfill" id="qb_eps"></div></div><span class="qval" id="qv_eps">–</span></div>
+    <div class="qrow"><span class="qlabel">squad_deaths</span><div class="qbar"><div class="qfill" id="qb_deaths"></div></div><span class="qval" id="qv_deaths">–</span></div>
+    <div class="qrow"><span class="qlabel">rank_ups</span><div class="qbar"><div class="qfill" id="qb_rankups"></div></div><span class="qval" id="qv_rankups">–</span></div>
   </div>
-  <div class="panel c8" title="What jev's squad has learned, per monster type: green = the squad favors that tactic (it worked), red = it avoids that tactic (it got monsters killed). Numbers are multipliers on the tactic's base chance."><h2>Learned weight heatmap — nemesis rows</h2>
-    <table class="heat" id="heat"></table>
+
+  <div class="panel c6 doc" id="doc_dodge" title="Evasion weights: how much the squad favors sidesteps, break-offs and door retreats. The question line re-writes itself from your health and jev's last action.">
+    <div class="dochead"><span class="tag">[DODGE]</span><span class="q" id="dodgeq">The player's current top priority is unknown. What does this exact moment call for?</span></div>
+    <div class="qrow"><span class="qlabel">dodge_left</span><div class="qbar"><div class="qfill" id="qb_fl"></div></div><span class="qval" id="qv_fl">–</span></div>
+    <div class="qrow"><span class="qlabel">dodge_right</span><div class="qbar"><div class="qfill" id="qb_fr"></div></div><span class="qval" id="qv_fr">–</span></div>
+    <div class="qrow"><span class="qlabel">back_off</span><div class="qbar"><div class="qfill" id="qb_fb"></div></div><span class="qval" id="qv_fb">–</span></div>
+    <div class="qrow"><span class="qlabel">door_run</span><div class="qbar"><div class="qfill" id="qb_door"></div></div><span class="qval" id="qv_door">–</span></div>
+  </div>
+
+  <div class="panel c6 doc" id="doc_move" title="Movement weights plus the full per-type weight heatmap: green = the squad favors that tactic (it worked), red = it avoids that tactic (it got monsters killed).">
+    <div class="dochead"><span class="tag">[MOVEMENT]</span><span class="q">Given the current situation, how should the player move right now?</span></div>
+    <div class="qrow"><span class="qlabel">hunt</span><div class="qbar"><div class="qfill" id="qb_hunt"></div></div><span class="qval" id="qv_hunt">–</span></div>
+    <div class="qrow"><span class="qlabel">ambush</span><div class="qbar"><div class="qfill" id="qb_amb"></div></div><span class="qval" id="qv_amb">–</span></div>
+    <table class="heat" id="heat" style="margin-top:10px"></table>
     <div class="legend">
       <span><span class="chip" style="background:#f87171"></span> punished (&lt;1.0)</span>
-      <span><span class="chip" style="background:#1d2940"></span> neutral 1.0</span>
+      <span><span class="chip" style="background:#1c3a26"></span> neutral 1.0</span>
       <span><span class="chip" style="background:#34d399"></span> rewarded (&gt;1.0)</span>
       <span style="margin-left:auto" class="deaths" id="deaths"></span>
     </div>
+    <div class="wbline" id="wbias" style="margin-top:8px">no learned bias yet — the nemesis has to die (or kill) first</div>
   </div>
 
-  <div class="panel c8" title="Each line is one tactic, averaged over the squad. When the line moves, jev just re-tuned that tactic from what killed his monsters — this is the learning, live."><h2>Weight drift — how jev keeps retuning the tactics
+  <div class="panel c12 doc" id="strings" title="Live feed of every variable jev changes: tactic weights and weapon bias (diffed every second), plus rank, XP and epsilon (checked 10x per second). This is the learning, listed line by line as it happens.">
+    <div class="dochead"><span class="tag">[STRINGS]</span><span class="q">jev pulling the strings — every changed variable</span><span class="r" id="dcount" style="margin-left:auto">0 changes</span></div>
+    <ul class="tick" id="dfeed"><li class="empty">no changes yet — fight jev and his numbers start moving</li></ul>
+  </div>
+
+  <div class="panel c8 doc" id="doc_drift" title="Each line is one tactic, averaged over the squad. When the line moves, jev just re-tuned that tactic from what killed his monsters — this is the learning, live.">
+    <h2>Weight drift — how jev keeps retuning the tactics
       <span class="r" id="wdrift_r"></span></h2>
     <canvas class="spk tall" id="spk_w"></canvas>
     <div class="leg" id="wleg"></div>
   </div>
-  <div class="panel c4" title="Everything that just happened, translated to plain English: kills, hits, and jev's rank changes."><h2>Event ticker</h2><ul class="tick" id="tick"></ul></div>
+  <div class="panel c4 doc" id="doc_record" title="This session's scoreboard and the event transcript: what you and jev have done to each other since the dashboard connected.">
+    <h2>Scoreboard <span class="r" id="sbtime"></span></h2>
+    <div class="sb" id="sb"><div class="tile"><div class="v">–</div><div class="l">waiting for the engine…</div></div></div>
+    <h2 style="margin-top:12px">Transcript</h2>
+    <ul class="tick" id="tick"></ul>
+  </div>
 
   <div class="panel c6" title="The agent's own numbers over the last ~15 minutes: chaos level, reward per episode, and how long the nemesis survives."><h2>Telemetry — last 15 min</h2>
     <div class="spkrow"><div class="spkhead"><span>epsilon</span><span id="spk_eps_v"></span></div>
@@ -235,12 +297,10 @@ ul.tick li.demote{color:var(--am)}
     <div class="spkrow"><div class="spkhead"><span>survival seconds / player hp</span><span id="spk_surv_v"></span></div>
       <canvas class="spk" id="spk_surv"></canvas></div>
   </div>
-  <div class="panel c6" title="jev's rank over time (step chart) — every step up is ~100 of your damage absorbed; every dip is a kill he scored on you."><h2>Rank over time <span class="r">the ladder, 1 Hz</span></h2>
+  <div class="panel c6 doc" title="jev's rank over time (step chart) — every step up is ~100 of your damage absorbed; every dip is a kill he scored on you."><h2>Rank over time <span class="r">the ladder, 1 Hz</span></h2>
     <canvas class="spk" id="spk_sk" style="height:80px"></canvas>
-    <h2 style="margin-top:12px" title="Which of YOUR weapons the squad has learned to fear (positive) or shrug off (negative), per monster type.">Weapon bias per type</h2>
-    <div class="wbline" id="wbias">no learned bias yet — the nemesis has to die (or kill) first</div>
   </div>
-  <div class="foot">PROJECT NEMESIS // phase 9 // no stat buffs — the weights are the whole story</div>
+  <div class="foot">PROJECT NEMESIS // phase 9.19 // no stat buffs — the weights are the whole story</div>
 </div>
 <script>
 "use strict";
@@ -377,6 +437,7 @@ function showDelta(list){
   if(key===lastDeltaTop)return;              // nothing new — keep the flash
   const fresh=key.split(";")[0]!==lastDeltaTop.split(";")[0];
   lastDeltaTop=key;
+  if(fresh)flashDocs(top[0]);
   if(!top.length){el.innerHTML='<li class="empty">no changes yet — fight jev and his numbers start moving</li>';return;}
   el.innerHTML=top.map((d,i)=>
     `<li class="${esc(d.kind||"")}${i===0&&fresh?" fresh":""}"><span class="t">${new Date((d.ts||0)*1000).toLocaleTimeString()}</span>${deltaLine(d)}</li>`).join("");
@@ -411,8 +472,8 @@ function spark(canvas,vals,color,now,fill){
   const w=c.clientWidth||400,h=c.height;
   const ctx=c.getContext("2d");
   ctx.clearRect(0,0,w,h);
-  ctx.strokeStyle="#16223a";ctx.strokeRect(0.5,0.5,w-1,h-1);
-  if(!vals.length){ctx.fillStyle="#31415e";ctx.font="10px monospace";
+  ctx.strokeStyle="#14291b";ctx.strokeRect(0.5,0.5,w-1,h-1);
+  if(!vals.length){ctx.fillStyle="#3d6b4c";ctx.font="10px monospace";
     ctx.fillText("no data yet",8,h/2);return;}
   const mn=Math.min(...vals),mx=Math.max(...vals),sp=(mx-mn)||1;
   ctx.beginPath();
@@ -447,7 +508,7 @@ function drawWeightDrift(rows){
   const c=$("spk_w");if(!c)return;
   const w=c.clientWidth||600,h=c.height,ctx=c.getContext("2d");
   ctx.clearRect(0,0,w,h);
-  ctx.strokeStyle="#16223a";ctx.strokeRect(0.5,0.5,w-1,h-1);
+  ctx.strokeStyle="#14291b";ctx.strokeRect(0.5,0.5,w-1,h-1);
   // series: order -> [mean tactic weight per row that has any]
   const series={};ORDERS.forEach(o=>series[o]=[]);
   let count=0;
@@ -462,7 +523,7 @@ function drawWeightDrift(rows){
       series[o].push(n?s/n:null);
     }
   }
-  if(!count){ctx.fillStyle="#31415e";ctx.font="10px monospace";
+  if(!count){ctx.fillStyle="#3d6b4c";ctx.font="10px monospace";
     ctx.fillText("no weight changes yet — fight something (deaths/kill events move the weights)",8,h/2);
     $("wdrift_r").textContent="";return;}
   // baseline 1.0
@@ -471,9 +532,9 @@ function drawWeightDrift(rows){
   const pad=0.05;mn=Math.max(0,mn-pad);mx=Math.min(2.2,mx+pad);
   const Y=v=>h-10-((v-mn)/(mx-mn||1))*(h-24);
   const X=i=>(i/(count-1||1))*(w-16)+8;
-  ctx.setLineDash([3,4]);ctx.strokeStyle="#31415e";
+  ctx.setLineDash([3,4]);ctx.strokeStyle="#3d6b4c";
   ctx.beginPath();ctx.moveTo(6,Y(1.0));ctx.lineTo(w-6,Y(1.0));ctx.stroke();ctx.setLineDash([]);
-  ctx.fillStyle="#31415e";ctx.font="9px monospace";
+  ctx.fillStyle="#3d6b4c";ctx.font="9px monospace";
   ctx.fillText("1.0 neutral",w-64,Y(1.0)-4);
   const leg=$("wleg");
   if(!leg.children.length){
@@ -503,9 +564,9 @@ function drawSkillHist(rows){
   const c=$("spk_sk");if(!c)return;
   const w=c.clientWidth||400,h=c.height,ctx=c.getContext("2d");
   ctx.clearRect(0,0,w,h);
-  ctx.strokeStyle="#16223a";ctx.strokeRect(0.5,0.5,w-1,h-1);
+  ctx.strokeStyle="#14291b";ctx.strokeRect(0.5,0.5,w-1,h-1);
   const vals=rows.map(r=>r.skill).filter(v=>typeof v==="number");
-  if(!vals.length){ctx.fillStyle="#31415e";ctx.font="10px monospace";
+  if(!vals.length){ctx.fillStyle="#3d6b4c";ctx.font="10px monospace";
     ctx.fillText("no data yet",8,h/2);return;}
   const Y=v=>h-8-(v/(LEVELS.length-1))*(h-18);
   const X=i=>(i/(vals.length-1||1))*(w-12)+6;
@@ -519,10 +580,10 @@ function drawSkillHist(rows){
   const cur=vals[vals.length-1];
   ctx.strokeStyle=OCOLORS.chase;ctx.lineWidth=1.6;
   ctx.shadowColor=OCOLORS.chase;ctx.shadowBlur=5;ctx.stroke();ctx.shadowBlur=0;
-  ctx.fillStyle="#5c6f8f";ctx.font="9px monospace";
+  ctx.fillStyle="#4e8a63";ctx.font="9px monospace";
   for(let l=0;l<LEVELS.length;l++){
     ctx.fillText(LEVELS[l],8,Y(l)-2);
-    ctx.fillStyle="#16223a";ctx.fillRect(74,Y(l),w-80,1);ctx.fillStyle="#5c6f8f";
+    ctx.fillStyle="#14291b";ctx.fillRect(74,Y(l),w-80,1);ctx.fillStyle="#4e8a63";
   }
   $("spk_sk").title=`now: rank ${cur} (${LEVELS[cur]||"?"})`;
 }
@@ -555,6 +616,72 @@ function classify(t){
   if(s.includes("kill:"))return"kill";
   if(s.includes("spawn"))return"spawn";
   return"";
+}
+// ---- Phase 9.19: query-document bar meters ----
+// One green bar per learned variable, redrawn from every /state poll:
+// tactic weights and weapon bias (mean across nemesis types), rank, XP,
+// epsilon and the session toll. .qfill carries a CSS width transition,
+// so the bars glide whenever jev re-tunes a number.
+function meanTactic(rows,name){
+  let s=0,n=0;
+  for(const r of rows||[]){const v=(r.tactics||{})[name];if(typeof v==="number"){s+=v;n++;}}
+  return n?s/n:null;
+}
+function meanBias(rows,name){
+  let s=0,n=0;
+  for(const r of rows||[]){const v=(r.weapon_bias||{})[name];if(typeof v==="number"){s+=v;n++;}}
+  return n?s/n:null;
+}
+function setBar(bar,val,v,mn,mx,txt){
+  const b=$(bar),t=$(val);if(!b)return;
+  if(v==null||isNaN(v)){b.style.width="0%";if(t)t.textContent="–";return;}
+  const p=Math.max(2,Math.min(100,100*(v-mn)/((mx-mn)||1)));
+  b.style.width=p+"%";
+  if(t)t.textContent=txt!=null?txt:Number(v).toFixed(2);
+}
+function renderBars(s){
+  const rows=s.rows||[],st=s.stats||{};
+  // [FIRING] — shooting pressure + fear of your shotgun.
+  setBar("qb_focus_fire","qv_focus_fire",meanTactic(rows,"focus_fire"),0,2);
+  setBar("qb_chase","qv_chase",meanTactic(rows,"chase"),0,2);
+  setBar("qb_hold","qv_hold",meanTactic(rows,"hold"),0,2);
+  setBar("qb_bias_sg","qv_bias_sg",meanBias(rows,"shotgun"),-1,1);
+  // [GOAL] — the scalar strings jev pulls (checked 10x/sec server-side).
+  const nxt=s.buddy_xp_next||100,xp=typeof s.buddy_xp==="number"?s.buddy_xp:0;
+  setBar("qb_xp","qv_xp",xp,0,nxt,xp+"/"+nxt);
+  const sk=typeof s.buddy_skill==="number"?s.buddy_skill:0;
+  setBar("qb_rank","qv_rank",sk,0,LEVELS.length-1,LEVELS[sk]||sk);
+  const eps=typeof s.epsilon==="number"?s.epsilon:0;
+  setBar("qb_eps","qv_eps",eps,0,1,eps.toFixed(3));
+  setBar("qb_deaths","qv_deaths",st.kills??0,0,15,String(st.kills??0));
+  setBar("qb_rankups","qv_rankups",st.rankups??0,0,10,String(st.rankups??0));
+  // [DODGE] — evasion weights.
+  setBar("qb_fl","qv_fl",meanTactic(rows,"flank_left"),0,2);
+  setBar("qb_fr","qv_fr",meanTactic(rows,"flank_right"),0,2);
+  setBar("qb_fb","qv_fb",meanTactic(rows,"fallback"),0,2);
+  setBar("qb_door","qv_door",meanTactic(rows,"use_door"),0,2);
+  // [MOVEMENT] — approach weights.
+  setBar("qb_hunt","qv_hunt",meanTactic(rows,"chase"),0,2);
+  setBar("qb_amb","qv_amb",meanTactic(rows,"ambush"),0,2);
+  // Terminal chrome: DIRECTOR row, standing order, dynamic dodge query.
+  $("dir_tic").textContent=s.tic?("tic "+s.tic):"–";
+  $("dir_hits").textContent=st.hits??0;
+  $("dir_kills").textContent=st.kills??0;
+  $("dir_rank").textContent=LEVELS[sk]||"–";
+  const act=ACT[s.last_action]||"hunting you down";
+  $("qsorder").textContent=act+" — rank "+(LEVELS[sk]||"?")+" · eps "+eps.toFixed(3)+" · hp "+(s.player_hp??"–");
+  const hp=typeof s.player_hp==="number"?s.player_hp:100;
+  const prio=hp<35?"trying to stay alive":hp<70?"looking for a fight he can win":"holding the line and fighting";
+  $("dodgeq").textContent="The player's current top priority is "+prio+" (hp "+hp+"). What does this exact moment call for?";
+}
+// A changed variable glows the document it belongs to (param feed, newest first).
+function flashDocs(d){
+  if(!d)return;
+  const id=d.kind==="bias"?"doc_fire":
+    d.kind==="tactic"?(["flank_left","flank_right","fallback","use_door"].includes(d.name)?"doc_dodge":
+      d.name==="ambush"?"doc_move":"doc_fire"):"doc_goal";
+  const el=$(id);if(!el)return;
+  el.classList.remove("fresh");void el.offsetWidth;el.classList.add("fresh");
 }
 // The plain-English headline: what jev is doing, his rank, and your gear.
 function explain(s){
@@ -609,6 +736,7 @@ function render(s){
   if(typeof s.buddy_skill==="number")drawSkill(s.buddy_skill);
   $("skpush").textContent=s.pushes?`${s.pushes} curriculum pushes`:"";
   explain(s);
+  renderBars(s);
   drawScoreboard(s.stats,s.session_secs);
   // Only snapshots that actually carry the server-side feed own the panel;
   // older file-replay snapshots (no param_feed key) must not clobber the
@@ -627,7 +755,7 @@ function renderHist(rows){
   hist=rows||[];
   renderHist._n=(renderHist._n||0)+1;
   if(!hasLiveFeed&&renderHist._n%5===1)showDelta(paramDeltasFromRows(hist));
-  spark("spk_eps",hist.map(r=>r.eps),"#22d3ee","spk_eps_v",true);
+  spark("spk_eps",hist.map(r=>r.eps),"#46ff7d","spk_eps_v",true);
   spark("spk_r",hist.map(r=>r.r),"#34d399","spk_r_v",true);
   spark("spk_surv",hist.map(r=>r.surv??r.hp),"#fbbf24","spk_surv_v",true);
   drawWeightDrift(hist);
@@ -687,6 +815,12 @@ const QSCSS=`
   body.compact ul.tick{max-height:110px}
   body.compact #dfeed{max-height:216px}
   body.compact .foot{display:none}
+  body.compact .qrow{grid-template-columns:96px 1fr 54px;font-size:10px;gap:6px;padding:3px 0}
+  body.compact .qbar{height:9px}
+  body.compact .docname{margin:8px 0 4px}
+  body.compact .dochead{font-size:11px;padding:2px 2px 6px;margin-bottom:8px}
+  body.compact .orderline{font-size:11px;padding:5px 8px}
+  body.compact .director{gap:10px;font-size:9px}
   body.compact .flashscreen .txt{font-size:28px;letter-spacing:5px}
   body.compact .flashscreen .sub{font-size:12px}
 `;

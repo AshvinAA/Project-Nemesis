@@ -173,6 +173,27 @@ def test_endpoints_and_ui(tmpdir: str) -> None:
         check("compact=1" in page and "body.compact" in page, "compact mode missing")
         check("max-width:660px" in page, "compact 660px column missing")
         check("qstoggle" in page, "compact toggle link missing")
+        # Phase 9.19 contract: query-document terminal + phosphor bar meters.
+        for tag in ("[INTENT]", "[FIRING]", "[GOAL]", "[DODGE]", "[MOVEMENT]", "[STRINGS]"):
+            check(tag in page, "doc tag %r missing" % tag)
+        check("DOCUMENTS" in page, "DOCUMENTS section label missing")
+        check('id="qsorder"' in page and "standing order" in page, "standing-order line missing")
+        check('id="dodgeq"' in page, "dynamic dodge query missing")
+        for did in ("doc_fire", "doc_goal", "doc_dodge", "doc_move", "doc_drift", "doc_record"):
+            check('id="%s"' % did in page, "doc panel %s missing" % did)
+        check("renderBars" in page and "setBar" in page, "bar-meter renderer missing")
+        check("meanTactic" in page and "meanBias" in page, "weight aggregation missing")
+        check("flashDocs" in page, "doc-flash hook missing")
+        for bid in ("qb_focus_fire", "qb_xp", "qb_rank", "qb_eps", "qb_deaths",
+                    "qb_fl", "qb_fr", "qb_fb", "qb_door", "qb_hunt", "qb_amb", "qb_bias_sg"):
+            check('id="%s"' % bid in page, "bar %s missing" % bid)
+        for tid in ("qv_focus_fire", "qv_xp", "qv_eps", "qv_fl"):
+            check('id="%s"' % tid in page, "bar value %s missing" % tid)
+        check('id="dir_tic"' in page and 'id="dir_hits"' in page
+              and 'id="dir_kills"' in page and 'id="dir_rank"' in page,
+              "DIRECTOR status row missing")
+        check("docglow" in page and "blink" in page, "terminal animations missing")
+        check("max-width:1180px" in page, "full-width wrap missing")
     finally:
         httpd.shutdown()
 

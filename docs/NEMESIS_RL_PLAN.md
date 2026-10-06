@@ -246,6 +246,20 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       "side-by-side" link in the status bar, which toggles back and forth) squeezes the whole
       console into one 660 px column: panels restack single-column, ladder/heatmap/tickers shrink,
       string-feed capped at 216 px, foot hidden. Default wide layout untouched.
+- [x] **9.19 "DOCUMENTS" terminal restyle**: the console is now a phosphor-green query document
+      like the user's screenshot. Top block = `[INTENT]` doc with a `> standing order:` line
+      (blinking cursor; reads jev's last action + rank + eps + hp) and a DIRECTOR status row
+      (DIRECTOR tic · SPANKED hits · KILLED squad deaths · RANK). Under a `DOCUMENTS` label, four
+      query panels render jev's actual variables as animated green bar meters (`.qfill` width
+      transition, redrawn from every 250 ms `/state` poll): `[FIRING]` hold_fire/press_chase/
+      hold_ground/fear_shotgun, `[GOAL]` xp_to_rank/rank/epsilon/squad_deaths/rank_ups,
+      `[DODGE]` dodge_left/dodge_right/back_off/door_run with a question line that re-writes
+      itself from player hp (`dodgeq`), `[MOVEMENT]` hunt/ambush + the per-type weight heatmap +
+      weapon-bias line. Tactic/bias bars = mean across nemesis types, normalized 0..2 (bias −1..1);
+      GOAL bars from the scalars. A fresh param-feed record glows the document it belongs to
+      (`flashDocs` + `docglow`), so a change is visible in two places at once (bar + strings feed).
+      STRINGS/DRIFT/RECORD/telemetry panels restyled same palette; compact mode restacks the new
+      docs too (qrow/qbar shrink rules). Python-only; engine untouched, no rebuild.
 
 ## 10. Phase 7 — Demo video **[ ]**
 
@@ -274,6 +288,7 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
 | D11 | Ladder design (9.12) | XP = post-armor damage the HUMAN deals the buddy, 100/rank, pot persists, trainer `buddy skill=N` resets the pot, legend caps the pot at 99; buddy self-splash and monster damage don't count; demote only when the buddy kills the human | LOCKED |
 | D12 | Rank-up drama (9.15) | Fog ring + taunt + screen message + victory pause are DISPLAY-ONLY (no stat/stat-adjacent effect); taunt lumps pre-baked (taunt:0..3); demotes stay quiet | LOCKED |
 | D13 | Param feed + compact mode (9.17/9.18) | Feed = LiveState diff (1 Hz wt rows + 10 Hz rank/xp/eps polls), pure `param_deltas()` shared with the UI replay fallback; no engine changes. Compact = `?compact=1` opt-in 660 px column (game default window is 640×400); wide layout stays the default | LOCKED |
+| D14 | Dashboard v6 "DOCUMENTS" restyle (9.19) | Terminal-green query docs with bar meters, chrome lines (`standing order`/`DIRECTOR`), doc-glow on param changes; all v5 data panels kept (heat moved into `[MOVEMENT]`, ticker into `RECORD`); ids preserved so the 9.13–9.18 contract still holds; Python-only | LOCKED |
 
 ## 13. Run cheat sheet (from HANDOFF.md — verified)
 
@@ -473,3 +488,35 @@ python tools/ladder_test.py
   pinky hits and each player death easess one rank) — the feed makes the economics visible; if the
   demo wants steadier drama, raise NEM_BUDDY_XP (D11) later.
 - Files: nemesis/{livestate,dashboard,test_dashboard}.py; PLAN §9/§12/§13/§14. No C changes, no rebuild.
+
+**2026-10-07 — Phase 9.19 BUILT and live-verified (session 7): dashboard v6 "DOCUMENTS" query terminal**
+- User request (screenshot): "make the dashboard something like this where the variables are
+  constantly changed by jev and its visible on the dashboard" — a terminal/phosphor-green console
+  where each section is headed by a bracketed natural-language query and every variable renders as
+  a horizontal bar meter.
+- **Built (Python-only, `_PAGE` restyle in nemesis/dashboard.py):** `[INTENT]` hero doc keeps the
+  plain-English explainer + ladder + XP bar and adds the `> standing order:` chrome line (blinking
+  block cursor) and the DIRECTOR row (tic / SPANKED / KILLED / RANK, fed from stats). `DOCUMENTS`
+  label, then four query docs with bar meters — `[FIRING]` (focus_fire/chase/hold means + shotgun
+  fear), `[GOAL]` (xp/rank/epsilon/squad_deaths/rank_ups), `[DODGE]` (flank_left/flank_right/
+  fallback/use_door + dynamic `dodgeq` question from player hp), `[MOVEMENT]` (hunt/ambush + the
+  per-type heatmap + weapon-bias line moved here) — plus restyled `[STRINGS]` (dfeed/dcount kept),
+  DRIFT, RECORD (scoreboard + transcript merged) and telemetry panels. `renderBars()` re-derives
+  every bar from each 250 ms poll (mean across types via `meanTactic`/`meanBias`, scalars from
+  snapshot), `.qfill` CSS transition makes the bars glide; `flashDocs()` glows the doc a fresh
+  param-feed record belongs to. Palette swept to green (--bg/--panel/--cy #46ff7d family; canvas
+  frames + dim text recolored). All v5 ids preserved → 9.13–9.18 test contract unchanged and
+  still green.
+- **Tests:** test_dashboard extended with the 9.19 contract (doc tags, doc panel/bar/value ids,
+  standing order, dodgeq, DIRECTOR row, renderBars/setBar/meanTactic/meanBias/flashDocs, docglow +
+  blink, full-width wrap) → **DASHBOARD PASS**; selftest + phase2 PASS.
+- **Live smoke:** killed two stale dashboard pythons holding :8787, launched fresh game + detached
+  `--live` dashboard (first game instance exited within ~20 s with no new dump — second launch
+  stable; worth remembering). ESTABLISHED on :31666; served page carries all 27 v6 markers; state
+  streamed (tic 1698→6478), param_feed showed three real rank easements (3→2→1→0 — jev killed the
+  idle player three times), stats.eased=3; director then spawned a nemesis imp (deaths=1 in rows).
+  Cross-check: every qb_*/qv_* id written by renderBars exists in the HTML (no orphans). With
+  `-nomonsters` the tactic docs stay at "–" until the director spawns a squad — GOAL bars + feed
+  move regardless. Compact `?compact=1` stylesheet verified in served page (660 px + qrow shrink
+  rules); pixel check still on the user's screen.
+- Files: nemesis/{dashboard,test_dashboard}.py; PLAN §9/§12/§14. No C changes, no rebuild.
