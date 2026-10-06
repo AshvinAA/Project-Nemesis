@@ -27,7 +27,7 @@ from . import config
 from . import dashboard as dash
 from .curriculum import SkillCurriculum, level_for_episode
 from .events import parse_label
-from .livestate import LiveState
+from .livestate import LiveState, param_deltas
 
 failures: list[str] = []
 
@@ -161,6 +161,18 @@ def test_endpoints_and_ui(tmpdir: str) -> None:
         check("drawScoreboard" in page, "scoreboard renderer missing")
         for sid in ("sb_kills", "sb_hits", "sb_dmg", "sb_rankups", "sb_eased", "sb_pdeaths"):
             check(sid in page, "scoreboard tile %s missing" % sid)
+        # Phase 9.17 contract: the "jev pulling the strings" parameter feed.
+        check('id="strings"' in page, "param-feed panel missing")
+        check("jev pulling the strings" in page, "param-feed headline missing")
+        check('id="dfeed"' in page and 'id="dcount"' in page, "param-feed list missing")
+        check("showDelta" in page and "deltaLine" in page, "param-feed renderer missing")
+        check("paramDeltasFromRows" in page, "replay param-diff fallback missing")
+        for k in ("tactic", "bias", "deaths", "rank", "xp", "eps"):
+            check('"%s"' % k in page, "param-feed kind %r missing from renderer" % k)
+        # Phase 9.18 contract: side-by-side compact mode.
+        check("compact=1" in page and "body.compact" in page, "compact mode missing")
+        check("max-width:660px" in page, "compact 660px column missing")
+        check("qstoggle" in page, "compact toggle link missing")
     finally:
         httpd.shutdown()
 
@@ -249,6 +261,78 @@ def test_event_label_tolerance() -> None:
     check(config.BUDDY_XP_PER_RANK == 100, "BUDDY_XP_PER_RANK must mirror NEM_BUDDY_XP (100)")
 
 
+def test_param_feed() -> None:
+    """Phase 9.17: /state must carry the live parameter-change feed and the
+    history rows must stay diffable (the file-replay fallback re-derives it)."""
+    old_lp, old_hp = config.LIVE_STATE_PATH, config.STATE_HISTORY_PATH
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.LIVE_STATE_PATH = os.path.join(tmpdir, "pf_live.json")
+        config.STATE_HISTORY_PATH = os.path.join(tmpdir, "pf_hist.jsonl")
+        old_hist_every = config.HISTORY_APPEND_EVERY
+        config.HISTORY_APPEND_EVERY = 0.0          # force a history row per feed
+        try:
+            live = LiveState()
+            _feed(live, _synthetic_obs(), times=1)  # arms baselines
+            check(live.snapshot.get("param_feed") == [], "fresh feed must be empty")
+            # 1) tactic weights move (1 Hz diff) ...
+            obs2 = _synthetic_obs()
+            obs2["nemesis"]["rows"][0]["tactics"]["chase"] = 1.9
+            obs2["nemesis"]["rows"][0]["weapon_bias"]["pistol"] = 0.5
+            obs2["nemesis"]["rows"][0]["deaths"] = 4
+            # 2) ... and scalars move (10 Hz poll): rank, xp, epsilon.
+            obs2["nemesis"]["buddy_skill"] = 3
+            obs2["nemesis"]["buddy_xp"] = 90
+            shim = dash._LiveShim()
+            shim.epsilon_override = live.snapshot["epsilon"]   # pin epsilon
+            live.update(shim, obs2, None)
+            feed = live.snapshot.get("param_feed", [])
+            kinds = {(d["kind"], d.get("name")) for d in feed}
+            for want in (("tactic", "chase"), ("bias", "pistol"),
+                         ("deaths", None), ("rank", None), ("xp", None)):
+                check(want in kinds, "param_feed missing %r: %r" % (want, kinds))
+            check(("eps", None) not in kinds, "pinned epsilon must not look like a move")
+            chase = next(d for d in feed if d["kind"] == "tactic" and d["name"] == "chase")
+            check(chase["old"] == 1.42 and chase["new"] == 1.9, "tactic delta values wrong: %r" % chase)
+            check(chase["type"] == "shotgun" and "ts" in chase, "tactic delta needs type+ts")
+            rankd = next(d for d in feed if d["kind"] == "rank")
+            check(rankd["old"] == 2 and rankd["new"] == 3, "rank delta wrong: %r" % rankd)
+            # No change -> no new records (no churn).  Feed the SAME shim so
+            # epsilon stays pinned (a fresh _LiveShim would look like a move).
+            n_before = len(live.snapshot["param_feed"])
+            for _ in range(3):
+                live.update(shim, obs2, None)
+            check(len(live.snapshot["param_feed"]) == n_before, "unchanged obs grew the feed")
+            # Epsilon is also a string jev pulls — its own record when it moves.
+            shim.epsilon_override = 0.15
+            live.update(shim, obs2, None)
+            epsd = next(d for d in live.snapshot["param_feed"] if d["kind"] == "eps")
+            check(epsd["new"] == 0.15, "eps delta wrong: %r" % epsd)
+        finally:
+            config.LIVE_STATE_PATH, config.STATE_HISTORY_PATH = old_lp, old_hp
+            config.HISTORY_APPEND_EVERY = old_hist_every
+
+
+def test_param_deltas_pure() -> None:
+    """param_deltas() is the shared diff: records exactly the moves."""
+    prev = {"shotgun": {"deaths": 1, "tactics": {"chase": 1.0, "hold": 1.0},
+                        "weapon_bias": {"pistol": 0.0}},
+            "imp": {"deaths": 0, "tactics": {}, "weapon_bias": {}}}
+    cur = {"shotgun": {"deaths": 2, "tactics": {"chase": 1.5, "hold": 1.0},
+                       "weapon_bias": {"pistol": -0.25, "shotgun": 0.1}},
+           "imp": {"deaths": 0, "tactics": {"ambush": 0.8}, "weapon_bias": {}}}
+    out = param_deltas(prev, cur)
+    got = {(d["kind"], d["type"], d.get("name")) for d in out}
+    check(("tactic", "shotgun", "chase") in got, "chase move missing: %r" % got)
+    check(("tactic", "imp", "ambush") in got, "new-type tactic move missing")
+    check(("bias", "shotgun", "pistol") in got, "bias move missing")
+    check(("bias", "shotgun", "shotgun") in got, "new bias key missing")
+    check(("deaths", "shotgun", None) in got, "deaths diff missing")
+    check(("tactic", "shotgun", "hold") not in got, "unchanged tactic must not appear")
+    for d in out:
+        check(d["old"] != d["new"], "no-op delta leaked: %r" % d)
+    check(param_deltas(prev, prev) == [], "identical maps must diff to []")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         test_endpoints_and_ui(tmpdir)
@@ -256,6 +340,8 @@ def main() -> int:
     test_scoreboard_stats()
     test_curriculum_ladder()
     test_event_label_tolerance()
+    test_param_deltas_pure()
+    test_param_feed()
     if failures:
         print("DASHBOARD FAIL:")
         for f_ in failures:

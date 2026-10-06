@@ -16,6 +16,13 @@ Runs three ways:
     snapshot live, so the dashboard runs alongside a plain game session with
     no agent.  The engine accepts exactly ONE client: use --live only when
     the agent is NOT running.
+
+Phase 9.17: the "jev pulling the strings" feed — /state carries param_feed,
+the list of every learned variable jev changed (tactic weights, weapon
+bias, per-type deaths, rank, XP, epsilon), newest first.
+Phase 9.18: side-by-side demo mode — `?compact=1` (or the link in the
+status bar) squeezes the console to a single ~660 px column so it sits
+beside the game's default 640x400 window.
 """
 
 from __future__ import annotations
@@ -163,10 +170,19 @@ ul.tick li.demote{color:var(--am)}
 #hero.flash{animation:heroflash 1.9s ease}
 @keyframes heroflash{0%,100%{box-shadow:0 0 0 1px #000 inset,0 8px 24px #0008}
   30%{box-shadow:0 0 0 2px #22d3ee inset,0 0 70px #22d3ee66}}
-</style></head><body><div class="wrap">
+/* Phase 9.18: "jev pulling the strings" — parameter-change feed */
+#dfeed{max-height:330px;overflow:hidden}
+#dfeed li{display:flex;gap:6px;align-items:baseline}
+#dfeed li b{color:var(--am)}
+#dfeed li i{color:var(--dim);font-style:normal;font-size:9px}
+#dfeed li.empty{color:#31415e}
+#dfeed li.fresh{animation:dfin 1.6s ease}
+@keyframes dfin{0%{background:#22d3ee33}100%{background:transparent}}
+#dcount{color:var(--cy);letter-spacing:0;text-transform:none}
+</style></head><body class="__QS__"><div class="wrap">
 <div class="bar">
   <h1>Nemesis <span class="sub">// weight-evolution console — watching the jev learn</span></h1>
-  <div class="status" id="status"><span class="pulse"></span>connecting…</div>
+  <div class="status" id="status"><span class="pulse"></span>connecting… · <span id="qsline"></span> · <a href="?compact=1" id="qstoggle" title="shrink the console to sit beside the game window (demo side-by-side)">side-by-side</a></div>
 </div>
 <div class="grid">
   <div class="panel c3" title="How many training episodes the nemesis squad has finished. One episode = jev spawns, fights, and dies (or you die). More episodes = more learning."><h2>Episode</h2><div class="big" id="ep">–</div>
@@ -184,6 +200,11 @@ ul.tick li.demote{color:var(--am)}
     <div class="ladder" id="ladder"></div>
     <div class="explain-sub" id="explain2" style="margin-top:10px">the training duel: jev hunts you, you rough him up — every 100 damage he absorbs promotes him one rank; if he kills you, he eases off one rank</div>
     <div class="xpwrap" title="XP = the damage YOU have dealt jev since his last rank-up. Fill the bar and he promotes."><div class="xpbar" id="xpbar"></div><span class="xptext" id="xptext"></span></div>
+  </div>
+
+  <div class="panel c12" id="strings" title="Live feed of every variable jev changes: tactic weights and weapon bias (diffed every second), plus rank, XP and epsilon (checked 10x per second). This is the learning, listed line by line as it happens.">
+    <h2>jev pulling the strings — every changed variable <span class="r"><span id="dcount">0 changes</span></span></h2>
+    <ul class="tick" id="dfeed"><li class="empty">no changes yet — fight jev and his numbers start moving</li></ul>
   </div>
 
   <div class="panel c4" title="This session's scoreboard: what you and jev have done to each other since the dashboard connected."><h2>Scoreboard <span class="r" id="sbtime"></span></h2>
@@ -239,8 +260,16 @@ const RANK_BLURB=["barely knows which end of the gun is which",
   "starting to aim before he shoots","fast reactions — he keeps his distance now",
   "punishes every mistake — do not miss","he has seen everything. Good luck."];
 let hist=[];
+let hasLiveFeed=false;   // /state carries a server-side param_feed?
 
 const $=id=>document.getElementById(id);
+// The status bar is rewritten every poll; this keeps the engine-clock slot
+// and the side-by-side toggle alive across re-renders.
+function statusHTML(msg){
+  return '<span class="pulse"></span>'+msg+
+    ' · <span id="qsline"></span> · <a href="?compact=1" id="qstoggle" '+
+    'title="shrink the console to sit beside the game window (demo side-by-side)">side-by-side</a>';
+}
 function cellColor(v){
   if(v==null||isNaN(v))return null;
   const d=(v-1.0)/0.6;              // +-0.6 deviation saturates
@@ -323,6 +352,59 @@ function rankFlash(rank,name){
   $("flashsub").textContent=`jev is now ${name.toUpperCase()}`;
   ov.classList.remove("go");void ov.offsetWidth;ov.classList.add("go");
   const hero=$("hero");hero.classList.remove("flash");void hero.offsetWidth;hero.classList.add("flash");
+}
+// ---- Phase 9.17: "jev pulling the strings" — the parameter-change feed ----
+// One row per variable jev changed, newest first. tactic/bias/deaths come
+// from the 1 Hz weight diffs (LiveState.param_deltas); rank/xp/epsilon are
+// checked 10x/sec server-side. This is the learning, itemized.
+function deltaLine(d){
+  if(d.kind==="rank")return `<b>rank</b> ${LEVELS[d.old]??d.old} → <b>${LEVELS[d.new]??d.new}</b> <i>(${d.new>d.old?"promoted — your damage taught him":"eased off — he killed you"})</i>`;
+  if(d.kind==="xp")return `<b>xp</b> ${d.old} → <b>${d.new}</b> <i>(damage banked toward his next rank)</i>`;
+  if(d.kind==="eps")return `<b>epsilon</b> ${Number(d.old).toFixed(3)} → <b>${Number(d.new).toFixed(3)}</b> <i>(learning noise re-tuned)</i>`;
+  const nm=d.type==="buddy"?"jev himself":(NICE[d.type]||d.type);
+  if(d.kind==="tactic")return `<b>${nm}</b> tactic <b>${d.name}</b>: ${fmt(d.old,2)} → <b>${fmt(d.new,2)}</b> <i>(${d.new>d.old?"rewarded — that worked":"punished — that backfired"})</i>`;
+  if(d.kind==="bias")return `<b>${nm}</b> fear of your <b>${d.name}</b>: ${d.old>0?"+":""}${d.old} → <b>${d.new>0?"+":""}${d.new}</b> <i>(weapon bias retuned)</i>`;
+  if(d.kind==="deaths")return `<b>${nm}</b> deaths: ${d.old} → <b>${d.new}</b> <i>(the squad paid to learn that)</i>`;
+  return esc(JSON.stringify(d));
+}
+let lastDeltaTop="";
+function showDelta(list){
+  const el=$("dfeed");if(!el)return;
+  const arr=list||[],top=arr.slice(0,20);
+  const dc=$("dcount");
+  if(dc)dc.textContent=arr.length?(arr.length+(arr.length>=80?"+":" ")+" changes"):"0 changes";
+  const key=top.map(d=>[d.kind,d.type||"",d.name||"",d.old,d.new].join("|")).join(";");
+  if(key===lastDeltaTop)return;              // nothing new — keep the flash
+  const fresh=key.split(";")[0]!==lastDeltaTop.split(";")[0];
+  lastDeltaTop=key;
+  if(!top.length){el.innerHTML='<li class="empty">no changes yet — fight jev and his numbers start moving</li>';return;}
+  el.innerHTML=top.map((d,i)=>
+    `<li class="${esc(d.kind||"")}${i===0&&fresh?" fresh":""}"><span class="t">${new Date((d.ts||0)*1000).toLocaleTimeString()}</span>${deltaLine(d)}</li>`).join("");
+}
+// File-replay mode has no param_feed in /state — re-derive the same feed
+// from the 1 Hz history rows (same diff LiveState does in RAM).
+function paramDeltasFromRows(rows){
+  const out=[];let prev=null;
+  for(const r of (rows||[])){
+    const wt=r.wt||{};
+    if(prev){
+      for(const tn of new Set([...Object.keys(prev),...Object.keys(wt)])){
+        const p=prev[tn]||{},c=wt[tn]||{};
+        const pt=p.tactics||{},ct=c.tactics||{};
+        for(const k of new Set([...Object.keys(pt),...Object.keys(ct)]))
+          if(k in pt&&k in ct&&pt[k]!==ct[k])
+            out.push({ts:r.ts,kind:"tactic",type:tn,name:k,old:pt[k],new:ct[k]});
+        const pb=p.weapon_bias||{},cb=c.weapon_bias||{};
+        for(const k of new Set([...Object.keys(pb),...Object.keys(cb)]))
+          if(k in pb&&k in cb&&pb[k]!==cb[k])
+            out.push({ts:r.ts,kind:"bias",type:tn,name:k,old:pb[k],new:cb[k]});
+        if(typeof p.deaths==="number"&&typeof c.deaths==="number"&&p.deaths!==c.deaths)
+          out.push({ts:r.ts,kind:"deaths",type:tn,old:p.deaths,new:c.deaths});
+      }
+    }
+    prev=wt;
+  }
+  return out.slice(-40).reverse();
 }
 function spark(canvas,vals,color,now,fill){
   const c=$(canvas);if(!c)return;
@@ -503,11 +585,15 @@ function explain(s){
     bar.style.width=Math.min(100,100*xp/nxt)+"%";bar.classList.remove("max");
     txt.textContent=`next rank in ${xp} / ${nxt} XP — XP is the damage you deal him`;
   }
+  // The string-pull feed breathes with the panel: shorter in side-by-side mode.
+  const df=$("dfeed");
+  if(df)df.style.maxHeight=document.body.classList.contains("compact")?"216px":"330px";
 }
 function render(s){
-  if(!s||!s.ts){$("status").innerHTML='<span class="pulse"></span>waiting for first snapshot…';return;}
+  if(!s||!s.ts){$("status").innerHTML=statusHTML('waiting for first snapshot…');$("qsline").textContent="";return;}
   $("status").className="status ok";
-  $("status").innerHTML='<span class="pulse"></span>live · tic '+s.tic+' · '+new Date().toLocaleTimeString();
+  $("status").innerHTML=statusHTML('live · tic '+s.tic+' · '+new Date().toLocaleTimeString());
+  $("qsline").textContent=s.tic?("engine clock "+(s.tic/35).toFixed(0)+"s"):"no engine";
   $("ep").textContent=s.episode_label;
   $("epsub").textContent=`completed episodes: ${s.episode} · alive: ${s.alive?"yes":"no"}`;
   $("eps").textContent=fmt(s.epsilon,3);
@@ -524,6 +610,7 @@ function render(s){
   $("skpush").textContent=s.pushes?`${s.pushes} curriculum pushes`:"";
   explain(s);
   drawScoreboard(s.stats,s.session_secs);
+  showDelta(s.param_feed||[]);hasLiveFeed=Array.isArray(s.param_feed);
   scanRankups(s.events);
   drawHeat(s.rows||[]);
   const tick=$("tick");
@@ -535,6 +622,8 @@ function render(s){
 }
 function renderHist(rows){
   hist=rows||[];
+  renderHist._n=(renderHist._n||0)+1;
+  if(!hasLiveFeed&&renderHist._n%5===1)showDelta(paramDeltasFromRows(hist));
   spark("spk_eps",hist.map(r=>r.eps),"#22d3ee","spk_eps_v",true);
   spark("spk_r",hist.map(r=>r.r),"#34d399","spk_r_v",true);
   spark("spk_surv",hist.map(r=>r.surv??r.hp),"#fbbf24","spk_surv_v",true);
@@ -545,7 +634,7 @@ async function poll(){
   try{
     const s=await (await fetch("/state")).json();
     render(s);
-  }catch(e){$("status").innerHTML='<span class="pulse"></span>agent link down — retrying';}
+  }catch(e){$("status").innerHTML=statusHTML('agent link down — retrying');}
 }
 async function pollHist(){
   try{const h=await (await fetch("/history")).json();renderHist(h.rows||[]);}
@@ -564,6 +653,52 @@ function scanRankups(events){
     if(/eased:buddy:/.test(s))flashRank=-1;
   }
 }
+// Phase 9.18: side-by-side demo mode. ?compact=1 (or the status-bar link)
+// squeezes the whole console into a single ~660 px column — the footprint of
+// the game's default 640x400 window — so both fit side by side on one screen.
+const QSCSS=`
+  body.compact{padding:8px}
+  body.compact .wrap{max-width:660px}
+  body.compact .grid{gap:8px}
+  body.compact .panel{padding:8px;border-radius:8px}
+  body.compact .bar{margin-bottom:8px}
+  body.compact h1{font-size:11px;letter-spacing:1px}
+  body.compact .c3,body.compact .c4,body.compact .c5,body.compact .c6,
+  body.compact .c7,body.compact .c8{grid-column:span 12}
+  body.compact .big{font-size:22px}
+  body.compact .gauge{min-width:88px;padding:6px 4px}
+  body.compact .gauge .v{font-size:16px}
+  body.compact .explain-big{font-size:13px}
+  body.compact .explain-sub{font-size:10px}
+  body.compact .lnode{width:52px}
+  body.compact .ldot{width:20px;height:20px;font-size:9px}
+  body.compact .lname{font-size:7px}
+  body.compact .sb{grid-template-columns:1fr 1fr 1fr;gap:6px}
+  body.compact .sb .tile{padding:6px 8px}
+  body.compact .sb .tile .v{font-size:16px}
+  body.compact .spk{height:44px}
+  body.compact .spk.tall{height:96px}
+  body.compact #spk_sk{height:60px!important}
+  body.compact table.heat td.cell{min-width:40px;height:24px;font-size:9px}
+  body.compact table.heat td.type{font-size:9px}
+  body.compact ul.tick{max-height:110px}
+  body.compact #dfeed{max-height:216px}
+  body.compact .foot{display:none}
+  body.compact .flashscreen .txt{font-size:28px;letter-spacing:5px}
+  body.compact .flashscreen .sub{font-size:12px}
+`;
+if(new URLSearchParams(location.search).get("compact")==="1"){
+  document.body.classList.add("compact");
+  const st=document.createElement("style");st.textContent=QSCSS;document.head.appendChild(st);
+}
+document.addEventListener("click",e=>{
+  const a=e.target.closest("#qstoggle");
+  if(!a)return;
+  e.preventDefault();
+  const u=new URL(location.href);
+  u.searchParams.set("compact",document.body.classList.contains("compact")?"0":"1");
+  location.href=u;
+});
 poll();pollHist();scanRankups([]);
 setInterval(poll,250);setInterval(pollHist,1000);
 </script></body></html>"""
@@ -606,7 +741,8 @@ def make_handler(state: DashboardState):
     page = (_PAGE
             .replace("__ORDERS__", json.dumps(ORDER_KEYS))
             .replace("__LEVELS__", json.dumps(list(config.SKILL_LEVELS)))
-            .replace("__OCOLORS__", json.dumps(ORDER_COLORS)))
+            .replace("__OCOLORS__", json.dumps(ORDER_COLORS))
+            .replace("__QS__", ""))  # body class; ?compact=1 adds it client-side
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes, ctype: str) -> None:
