@@ -129,6 +129,7 @@ ul.tick li.kill{color:var(--rd)} ul.tick li.promo{color:var(--gr)} ul.tick li.sp
 @keyframes pu{0%,100%{opacity:.25}50%{opacity:1}}
 .ok .pulse{background:var(--gr);box-shadow:0 0 10px var(--gr)}
 .status{font-size:11px;color:var(--dim)}
+.status.stale{color:var(--rd)}
 .foot{margin-top:12px;font-size:10px;color:#3d6b4c;text-align:center;letter-spacing:1px}
 .wbline{font-size:11px;color:var(--dim);white-space:pre-line;line-height:1.7}
 .wbline b{color:var(--am)}
@@ -718,8 +719,19 @@ function explain(s){
 }
 function render(s){
   if(!s||!s.ts){$("status").innerHTML=statusHTML('waiting for first snapshot…');$("qsline").textContent="";return;}
-  $("status").className="status ok";
-  $("status").innerHTML=statusHTML('live · tic '+s.tic+' · '+new Date().toLocaleTimeString());
+  // Phase 9.19b: never pretend a frozen snapshot is live — the #1 way this
+  // page "looks dead" is a stale --live dashboard that lost the engine.
+  const age=(Date.now()/1000)-(s.ts||0);
+  if(age>300){
+    $("status").className="status";
+    $("status").innerHTML=statusHTML('file snapshot from '+new Date(s.ts*1000).toLocaleTimeString()+' — start the game for live data');
+  } else if(age>3){
+    $("status").className="status stale";
+    $("status").innerHTML=statusHTML('STALE — engine data stopped '+Math.round(age)+'s ago (is the game running?)');
+  } else {
+    $("status").className="status ok";
+    $("status").innerHTML=statusHTML('live · tic '+s.tic+' · '+new Date().toLocaleTimeString());
+  }
   $("qsline").textContent=s.tic?("engine clock "+(s.tic/35).toFixed(0)+"s"):"no engine";
   $("ep").textContent=s.episode_label;
   $("epsub").textContent=`completed episodes: ${s.episode} · alive: ${s.alive?"yes":"no"}`;
@@ -906,10 +918,19 @@ def make_handler(state: DashboardState):
     return Handler
 
 
+class _Server(ThreadingHTTPServer):
+    # HTTPServer sets SO_REUSEADDR, and on Windows that lets a SECOND server
+    # silently bind the SAME port - incoming connections then go to an
+    # arbitrary listener, which is exactly how a stale --live dashboard
+    # "shadows" a fresh one and the browser shows a frozen page while you
+    # play.  Disable reuse on nt so a double-bind fails loudly instead.
+    allow_reuse_address = os.name != "nt"
+
+
 def start(live=None, port: int | None = None):
     """Start the dashboard server. Returns (httpd, url)."""
     state = DashboardState(live)
-    httpd = ThreadingHTTPServer(
+    httpd = _Server(
         ("127.0.0.1", config.DASHBOARD_PORT if port is None else port),
         make_handler(state))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -982,7 +1003,13 @@ def main() -> int:
     if args.live:
         from .livestate import LiveState
         live = LiveState()
-        httpd, url = start(live=live, port=args.port)
+        try:
+            httpd, url = start(live=live, port=args.port)
+        except OSError as e:
+            print(f"[dashboard] cannot bind port {args.port}: {e}\n"
+                  "[dashboard] another dashboard is probably running - "
+                  "close it first:  Nemesis.bat kill")
+            return 1
         print(f"[dashboard] serving {url}")
         try:
             live_loop(live, max_seconds=args.max_seconds)
@@ -992,7 +1019,13 @@ def main() -> int:
             httpd.shutdown()
         return 0
 
-    httpd, url = start(live=None, port=args.port)
+    try:
+        httpd, url = start(live=None, port=args.port)
+    except OSError as e:
+        print(f"[dashboard] cannot bind port {args.port}: {e}\n"
+              "[dashboard] another dashboard is probably running - "
+              "close it first:  Nemesis.bat kill")
+        return 1
     print(f"[dashboard] serving {url}  (reads {config.LIVE_STATE_PATH} + history)")
     print("[dashboard] Ctrl+C to stop")
     try:
