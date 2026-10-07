@@ -69,10 +69,52 @@ class LiveLearner:
         self.rewards_log: list[float] = []
         self._survivals: list[float] = []   # ring of last 10 survival times
         self.last_action_name: Optional[str] = None
+        self.propose_count = 0          # 9.21: tactic-weight votes sent (telemetry)
+        self._propose_polls = 0         # 9.21: rate limiter for the vote stream
+        self.last_proposed_order: Optional[str] = None  # 9.21: retraction target
 
     def _emit(self, event: str, info: dict) -> None:
         if self.listener is not None:
             self.listener(event, info)
+
+    def _propose_weight(self, link, nem: dict, deltas: list[str]) -> None:
+        """Phase 9.21: push one weight-vote line to the engine ("nemesis
+        propose=<type> tactic_weight=<order>:<delta> ...").  The engine
+        clamps every delta and decays weights toward neutral, so this only
+        tilts the squad's stance distribution — never a hard override
+        (no-stat-buffs: movement intent only).  Also feeds the dashboard: the
+        FIRING/DODGE/MOVEMENT documents finally have a live signal to render
+        (jev visibly re-tuning the weights every ~0.5 s)."""
+        mtype = str(nem.get("type", ""))
+        if not mtype or not deltas:
+            return
+        reply = link.nemesis_propose(mtype, deltas)
+        if reply is not None:
+            self.propose_count += 1
+
+    def maybe_propose(self, link, nem: Optional[dict], order: str) -> None:
+        """9.21: rate-limited weight vote, one vote per
+        config.PROPOSE_EVERY_POLLS polls (~2 Hz at the 10 Hz loop).
+
+        Reallocation, not accumulation: the current tactic earns +DELTA and
+        the PREVIOUS distinct tactic is retracted -DELTA in the same line.
+        A steady policy therefore holds its tilt instead of marching the
+        weight to the engine's 2.0 ceiling, and a policy switch moves the
+        bars immediately (that is the visible learning the dashboard was
+        missing)."""
+        if nem is None or not order:
+            return
+        self._propose_polls += 1
+        if self._propose_polls < config.PROPOSE_EVERY_POLLS:
+            return
+        self._propose_polls = 0
+        d = config.PROPOSE_DELTA
+        deltas = [f"tactic_weight={order}:{d:+.3f}"]
+        prev = self.last_proposed_order
+        if prev and prev != order:
+            deltas.append(f"tactic_weight={prev}:-{d:.3f}")
+        self._propose_weight(link, nem, deltas)
+        self.last_proposed_order = order
 
     # -- HUD metrics (Phase 5: live in-engine overlay via C_Printf) ----------
 
@@ -289,6 +331,11 @@ def run(max_seconds: Optional[float] = None, port: Optional[int] = None,
                                      y=anchor[1] if anchor else None,
                                      hud=learner.hud_spec(last_action=order,
                                                           skill=curriculum.level))
+                    # 9.21: vote the policy's tactic into the engine's learned
+                    # weight table — this is what makes the dashboard's
+                    # FIRING/DODGE/MOVEMENT documents move (and steers the
+                    # director's tactic selection for this nemesis type).
+                    learner.maybe_propose(link, _find_nemesis(obs), order)
                     last_sent = (order, tuple(ids))
                     sent_line = {"t": round(time.time(), 3), "poll": polls,
                                  "ep": learner.episode_label(), "id": ids[0] if ids else None,

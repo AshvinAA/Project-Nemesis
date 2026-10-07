@@ -30,6 +30,17 @@ EPSILON_FLOOR = 0.05
 EPSILON_DECAY_EPISODES = 30
 QTABLE_PATH = "nemesis/rl/qtable.json"
 
+# --- Phase 9.21: learned-weight teaching (the propose stream) --------------
+# The dashboard's FIRING/DODGE/MOVEMENT documents render the engine's
+# per-type tactic weights; before 9.21 nothing ever moved them (the agent
+# ordered tactics at 10 Hz but never voted, and the engine's death lesson
+# only fired via NEM_Propose, which nobody called).  The agent now re-votes
+# its current policy action into the weight table at ~2 Hz; the engine
+# clamps every delta (NEM_MAXPROPOSAL) and decay pulls weights back to
+# neutral, so a runaway is structurally impossible.
+PROPOSE_EVERY_POLLS = 5     # vote the current tactic every N polls (~2 Hz)
+PROPOSE_DELTA = 0.04        # weight delta per vote (engine clamps per line)
+
 # --- Phase 9: hostile-buddy skill curriculum -------------------------------
 SKILL_LEVELS = ("rookie", "amateur", "semi-pro", "professional", "legend")
 SKILL_MAX = 4

@@ -239,6 +239,7 @@ ul.tick li.demote{color:var(--am)}
     <div class="qrow"><span class="qlabel">press_chase</span><div class="qbar"><div class="qfill" id="qb_chase"></div></div><span class="qval" id="qv_chase">–</span></div>
     <div class="qrow"><span class="qlabel">hold_ground</span><div class="qbar"><div class="qfill" id="qb_hold"></div></div><span class="qval" id="qv_hold">–</span></div>
     <div class="qrow"><span class="qlabel">fear_shotgun</span><div class="qbar"><div class="qfill" id="qb_bias_sg"></div></div><span class="qval" id="qv_bias_sg">–</span></div>
+    <div class="legend"><span class="deaths">weights learn from squad deaths — you have to take some down before the bars move</span></div>
   </div>
 
   <div class="panel c6 doc" id="doc_goal" title="The goal document: XP banked toward the next rank, the rank itself, epsilon (jev's randomness) and the session toll. Rank and XP move the instant you hit him or he dies.">
@@ -256,6 +257,7 @@ ul.tick li.demote{color:var(--am)}
     <div class="qrow"><span class="qlabel">dodge_right</span><div class="qbar"><div class="qfill" id="qb_fr"></div></div><span class="qval" id="qv_fr">–</span></div>
     <div class="qrow"><span class="qlabel">back_off</span><div class="qbar"><div class="qfill" id="qb_fb"></div></div><span class="qval" id="qv_fb">–</span></div>
     <div class="qrow"><span class="qlabel">door_run</span><div class="qbar"><div class="qfill" id="qb_door"></div></div><span class="qval" id="qv_door">–</span></div>
+    <div class="legend"><span class="deaths">1.00 = neutral. The dying tactic sheds weight; what kills them feeds fear_shotgun.</span></div>
   </div>
 
   <div class="panel c6 doc" id="doc_move" title="Movement weights plus the full per-type weight heatmap: green = the squad favors that tactic (it worked), red = it avoids that tactic (it got monsters killed).">
@@ -269,6 +271,7 @@ ul.tick li.demote{color:var(--am)}
       <span><span class="chip" style="background:#34d399"></span> rewarded (&gt;1.0)</span>
       <span style="margin-left:auto" class="deaths" id="deaths"></span>
     </div>
+    <div class="wbline" id="wbnote" style="margin-top:4px">hunt/ambush learn like every other weight: squad deaths push, your shotgun teaches fear</div>
     <div class="wbline" id="wbias" style="margin-top:8px">no learned bias yet — the nemesis has to die (or kill) first</div>
   </div>
 
@@ -624,13 +627,17 @@ function classify(t){
 // epsilon and the session toll. .qfill carries a CSS width transition,
 // so the bars glide whenever jev re-tunes a number.
 function meanTactic(rows,name){
+  // NEM_921_NEUTRAL: the engine omits weights within +-5% of neutral 1.0
+  // (token economy), so a missing key means "still neutral 1.0", not "no
+  // data". Only zero rows (no squad seen yet) is a true null ("--").
   let s=0,n=0;
-  for(const r of rows||[]){const v=(r.tactics||{})[name];if(typeof v==="number"){s+=v;n++;}}
+  for(const r of rows||[]){const t=r.tactics||{};const v=(typeof t[name]==="number")?t[name]:1.0;s+=v;n++;}
   return n?s/n:null;
 }
 function meanBias(rows,name){
+  // NEM_921_NEUTRAL: same rule for weapon bias — absent key = neutral 0.
   let s=0,n=0;
-  for(const r of rows||[]){const v=(r.weapon_bias||{})[name];if(typeof v==="number"){s+=v;n++;}}
+  for(const r of rows||[]){const t=r.weapon_bias||{};const v=(typeof t[name]==="number")?t[name]:0;s+=v;n++;}
   return n?s/n:null;
 }
 function setBar(bar,val,v,mn,mx,txt){

@@ -194,6 +194,16 @@ def test_endpoints_and_ui(tmpdir: str) -> None:
               "DIRECTOR status row missing")
         check("docglow" in page and "blink" in page, "terminal animations missing")
         check("max-width:1180px" in page, "full-width wrap missing")
+        # 9.21 contract: neutral weights are rendered as 1.00/0.00 (never
+        # "--") and the weight documents carry their learning explainers, so
+        # a static-idle table is visibly neutral rather than feeling broken.
+        for marker in ("NEM_921_NEUTRAL", "id=\"wbnote\"",
+                       "weights learn from squad deaths", "1.00 = neutral"):
+            check(marker in page, "9.21 weight-display contract missing: %r" % marker)
+        # 9.21 proposal wiring exists client-side contract — the propose
+        # stream itself is asserted end-to-end in test_selftest (engine line).
+        check("PROPOSE_DELTA" in config.__dict__ or hasattr(config, "PROPOSE_DELTA"),
+              "config.PROPOSE_DELTA missing (9.21 vote stream would be inert)")
     finally:
         httpd.shutdown()
 

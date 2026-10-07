@@ -278,6 +278,27 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       the browser; `dashboard.py` refuses double-binds (`allow_reuse_address` off on nt) and the
       page shows STALE/live honestly (snapshot age >3 s → "STALE — engine data stopped Ns ago").
 
+- [x] **9.21 The weight documents finally learn — FIRING/DODGE/MOVEMENT live**:
+      Reported: [GOAL] bars moved while every tactic/bias document sat static. Headless diagnosis
+      from the live session files: engine observe carried `"tactics":{}` — three stacked causes:
+      (1) nothing ever trained the table (`NEM_NoteKill` bumped only `deaths`; `NEM_NoteTactic`
+      recorded the dying tactic but `NEM_LastTactic` had zero callers; `NEM_Propose` was never
+      sent); (2) vocabulary split — `AI_Apply` notes tactics under AI_TypeName names
+      ("shotgunguy"/"zombieman") while the row table speaks "shotgun"/"zombie", so
+      `NEM_TypeIndex` returned -1 and the main nemesis type was silently dropped from every
+      tactic note; (3) at neutral the serializer omits every key (correct token economy) and the
+      dashboard rendered "–" with no neutral fallback. Engine fixes (rebuilt): death lessons in
+      `NEM_NoteKill` (dying tactic −0.08, others +0.01, finishing weapon +0.10 fear), hit fear
+      0.002→0.01 per hit (2× for >40 dmg), type aliases shotgunguy/zombieman/chaingunguy→rows in
+      `NEM_TypeIndex`, `AI_Apply` now notes BOTH vocabularies, focus-fire flank gate 0.3→0.1 so a
+      learned flank-avoidance actually flips the squad. Agent: `maybe_propose()` votes the
+      policy's current tactic at ~2 Hz (`config.PROPOSE_EVERY_POLLS=5`, `PROPOSE_DELTA=0.04`) —
+      engine clamps + decay make it a tilt, not an override (no-stat-buffs: movement intent
+      only). Dashboard: `meanTactic`/`meanBias` treat an absent key as neutral (1.00/0.00 shown,
+      not "–"); learning explainers added under FIRING/DODGE/MOVEMENT. Tests: selftest now
+      asserts the propose line stream (format/vocab/clamp), dashboard contract asserts the 9.21
+      markers; all suites PASS; JS parse OK; exe staged.
+
 ## 10. Phase 7 — Demo video **[ ]**
 
 - [ ] Reset-on-camera, narrate HUD (ep/ε/reward), fight at ep 1 vs ep ~25 vs random control.
@@ -307,6 +328,7 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
 | D13 | Param feed + compact mode (9.17/9.18) | Feed = LiveState diff (1 Hz wt rows + 10 Hz rank/xp/eps polls), pure `param_deltas()` shared with the UI replay fallback; no engine changes. Compact = `?compact=1` opt-in 660 px column (game default window is 640×400); wide layout stays the default | LOCKED |
 | D14 | Dashboard v6 "DOCUMENTS" restyle (9.19) | Terminal-green query docs with bar meters, chrome lines (`standing order`/`DIRECTOR`), doc-glow on param changes; all v5 data panels kept (heat moved into `[MOVEMENT]`, ticker into `RECORD`); ids preserved so the 9.13–9.18 contract still holds; Python-only | LOCKED |
 | D15 | Demo tuning (9.20) | Buddy = pistol-only in hostile duels (+clip top-up on respawn); buddy death banks +40 XP; `NEM_BUDDY_XP`/`BUDDY_XP_PER_RANK` = 60; shotgun grant human-only. Goal: visible rank arc in a 16-20 s take. Revert knobs: NEM_BUDDY_XP (p_nemesis.c), config.BUDDY_XP_PER_RANK, the 9.20-marked blocks in p_ai_coop.c/g_game.c | LOCKED (demo) |
+| D16 | Weight documents live (9.21) | Tactic weights learn from squad deaths (dying tactic −0.08, spread +0.01, finishing-weapon fear +0.10; hit fear 0.01/hit) + agent votes its policy tactic ~2 Hz via `nemesis propose`; type aliases fix the AI-vs-row vocabulary split (shotgunguy→shotgun etc.); dashboard renders neutral 1.00/0.00 instead of "–"; focus-fire flank gate 0.3→0.1 so learned weights flip squad behavior. Revert knobs: NEM_DEATH_*/NEM_HIT_FEAR (p_nemesis.c), config.PROPOSE_*, the 9.21-marked blocks in p_nemesis.c/p_ai_llm.c | LOCKED |
 
 ## 13. Run cheat sheet (from HANDOFF.md — verified)
 
@@ -563,3 +585,28 @@ python tools/ladder_test.py
   live verification happens at the user's next shortcut launch.
 - Files: BuddyDoom/files/{p_ai_coop.c,g_game.c,p_nemesis.c}; nemesis/{config,test_dashboard}.py;
   Nemesis.bat; tools/watch_game{,2}.ps1 (diagnostics); PLAN §9/§12/§14.
+
+**2026-10-07 — Phase 9.21 BUILT, tested, rebuilt clean: static FIRING/DODGE/MOVEMENT documents are now live learners**
+- **Diagnosed (headless, no game launch)**: polled the user's running dashboard (:8787 /state +
+  /history) — rows carried `"tactics":{}`/`"weapon_bias":{}` while GOAL scalars ticked. Engine
+  source confirmed nothing ever wrote those tables: the kill path counted deaths only, the tactic
+  note path was dead-lettered by the type-vocabulary split ("shotgunguy" vs "shotgun" —
+  NEM_TypeIndex -1), and `NEM_Propose` had zero callers. Answer to "dashboard bug or jev not
+  changing variables": BOTH — the engine genuinely never changed the variables (root cause), and
+  the dashboard faithfully rendered that as "–", which read as broken instead of neutral.
+- **Engine (rebuilt clean)**: death lessons in NEM_NoteKill, hit fear 0.01/hit, type aliases
+  (shotgunguy/zombieman/chaingunguy→shotgun/zombie/chaingun), AI_Apply dual-vocabulary tactic
+  notes, focus-fire flank gate 0.3→0.1. Braces balance verified programmatically; build [100%];
+  staged exe (16:07) newer than both sources (16:04).
+- **Agent**: `maybe_propose` stream — one clamped tactic-weight vote per ~5 polls (~2 Hz at the
+  10 Hz loop), telemetry counter on the learner. Dashboard: absent weight keys render neutral
+  (1.00 / 0.00, never "–"), learning explainers under the three documents.
+- **Tests**: DASHBOARD / SELFTEST / PHASE2 all PASS (selftest extended: every captured
+  `nemesis propose=` line checked for format/vocabulary/engine-clamp; dashboard contract extended
+  with the 9.21 neutral-render markers); page JS re-parsed clean (node `new Function`, exit 0).
+- No game launched (per user instruction) — live behavior verifies at the user's next shortcut
+  launch: take one squad member down and FIRING/DODGE/MOVEMENT move immediately (death lessons);
+  jev's votes glide the bars every ~0.5 s while it hunts (propose stream); `fear_shotgun` rises
+  per shotgun hit and jumps on kills.
+- Files: BuddyDoom/files/{p_nemesis.c,p_ai_llm.c}; nemesis/{rl_agent.py,config.py,dashboard.py,
+  test_selftest.py,test_dashboard.py}; PLAN §9.21/D16/§14.

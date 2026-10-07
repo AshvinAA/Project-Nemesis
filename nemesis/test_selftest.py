@@ -177,6 +177,28 @@ def main() -> int:
     # id freshness: after the roster change the agent must target id 5
     check(any("ids=5" in c for c in acts), f"never re-targeted new id 5: {acts}")
 
+    # 9.21 proposal stream: the agent must VOTE its policy's tactic into the
+    # engine's learned weight table — this is the signal that makes the
+    # dashboard's FIRING/DODGE/MOVEMENT documents move.  Lines must be exact
+    # vocabulary ("NEMESIS" row names via the engine's alias map) and
+    # per-delta magnitude within the engine clamp.
+    props = [c for c in cmds if c.startswith("nemesis propose")]
+    check(len(props) >= 1, f"agent never voted tactic weights (propose stream dead): {cmds[-6:]}")
+    import re as _re
+    _row_names = {"shotgunguy", "zombieman", "chaingunguy", "imp", "pinky"}
+    _orders = {"chase", "hold", "fallback", "flank_left", "flank_right",
+               "ambush", "focus_fire", "use_door"}
+    for p in props:
+        m = _re.match(r"nemesis propose=(\S+) tactic_weight=(\S+)", p)
+        check(m is not None, f"malformed proposal: {p}")
+        if not m:
+            continue
+        check(m.group(1) in _row_names, f"proposal type out of vocabulary: {p}")
+        for kw in m.group(2).split():
+            o, _, d = kw.partition(":")
+            check(o in _orders, f"proposal order out of vocabulary: {p}")
+            check(abs(float(d)) <= 0.5, f"proposal delta over engine clamp: {p}")
+
     # lifecycle: exactly one terminal episode end in the scripted stream
     # (id 6's death is cut off by the time limit)
     ends = [inf for ev, inf in lifecycle if ev == "episode_end"]

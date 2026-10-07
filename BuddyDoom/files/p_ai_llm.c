@@ -1088,7 +1088,10 @@ void P_AI_RuleTactics (void)
 		float wflank = NEM_TacticWeight (tn, "flank_left")
 			     + NEM_TacticWeight (tn, "flank_right");
 		float wfocus = NEM_TacticWeight (tn, "focus_fire") * 2.0f;
-		if (wflank + 0.3f >= wfocus)
+		if (wflank + 0.1f >= wfocus)   // 9.21: was +0.3f — with the death lesson
+					       // shedding flank to ~0.9 the learned bias
+					       // never crossed the old gate (0.9+0.9+0.3
+					       // = 2.1 >= 2.0); now it does
 		    { order = side ? AIO_FLANK_R : AIO_FLANK_L; side ^= 1; flanked++; did_flank = 1; }
 		else
 		    order = AIO_FOCUS;				// learned: flanking loses vs this player

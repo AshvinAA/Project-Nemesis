@@ -46,6 +46,12 @@ void C_Printf (const char* fmt, ...);
 #define NEM_BCEIL	 1.0f
 #define NEM_MAXPROPOSAL	0.5f		// max |delta| per proposal line
 #define NEM_DECAY	0.995f		// per-second multiplicative decay toward 1
+#define NEM_HIT_FEAR	0.01f		// 9.21: weapon-bias gain per player hit (was 0.002 --
+				// below the 0.05 serialize threshold for a whole
+				// demo session, so fear_shotgun never showed)
+#define NEM_DEATH_TACTIC	0.08f	// 9.21: shed from the tactic in effect at death
+#define NEM_DEATH_SPREAD	0.01f	// 9.21: spread to the other orders (~zero-sum)
+#define NEM_DEATH_FEAR		0.10f	// 9.21: fear bias for the finishing weapon
 #define NEM_EVENTMAX	64		// event ring size (labels observed by bridge).
 				// was 16: under sustained fire the ring overflowed
 				// between 10 Hz polls and the Python RL agent lost
@@ -114,6 +120,14 @@ int NEM_TypeIndex (const char* type)
     if (!type) return -1;
     for (i = 0; i < NEM_TYPES; i++)
 	if (!strcmp (type, nem_type_names[i])) return i;
+    // 9.21: the AI layer speaks AI_TypeName vocabulary ("shotgunguy",
+    // "zombieman"), the row table speaks the serializer vocabulary
+    // ("shotgun", "zombie").  Without these aliases NEM_NoteTactic's
+    // per-type attribution silently no-ops for the very types the demo
+    // spawns (NEM_TypeIndex returned -1 and the tactic note was dropped).
+    if (!strcmp (type, "shotgunguy")) return NEM_TypeIndex ("shotgun");
+    if (!strcmp (type, "zombieman"))	return NEM_TypeIndex ("zombie");
+    if (!strcmp (type, "chaingunguy")) return NEM_TypeIndex ("chaingun");
     return -1;
 }
 
@@ -155,7 +169,7 @@ void NEM_NoteDamageM (const char* type, mobj_t* source, int damage, int weapon_i
     // Ground-truth event for the bridge (and our own continuous counters).
     if (wi >= 0)
     {
-	nem_rows[ti].weapon_bias[wi] += 0.002f * (damage > 40 ? 2 : 1);
+	nem_rows[ti].weapon_bias[wi] += (damage > 40 ? 2.0f : 1.0f) * NEM_HIT_FEAR;
 	if (nem_rows[ti].weapon_bias[wi] > NEM_BCEIL) nem_rows[ti].weapon_bias[wi] = NEM_BCEIL;
 	snprintf (label, sizeof(label), "%ld:hit:%s:%s:%d",
 		  nem_event_seq++, nem_type_names[ti], nem_weapon_names[wi], damage);
@@ -253,6 +267,43 @@ void NEM_NoteKill (const char* type, mobj_t* source, int weapon_idx)
 	snprintf (label, sizeof(label), "%ld:kill:%s:%s",
 		  nem_event_seq++, nem_type_names[ti], nem_weapon_names[wi]);
 	NEM_PushEvent (label);
+    }
+    // Phase 9.21 death lessons: the squad's own learning signal, the missing
+    // half of the NEM_NoteTactic design.  This row died executing its last
+    // directive (nem_last_tactic, noted in AI_Apply) -- that tactic
+    // demonstrably got it killed, so shed weight from it and spread a little
+    // onto the alternatives; the finishing weapon earns fear bias (deaths
+    // teach faster than the per-hit drip).  Before this hook the tactics
+    // table sat at neutral 1.0 forever: the serializer (correctly) omitted
+    // every weight within +-5% of 1.0, so the observe carried "tactics":{}
+    // and the dashboard's FIRING/DODGE/MOVEMENT documents had nothing to
+    // move (they rendered "--" while only the GOAL scalars were live).
+    {
+	int o;
+	int li = NEM_OrderIndex (nem_last_tactic[ti]);
+	if (li < 0) li = NEM_OrderIndex ("chase");	// died unattributed: assume the
+							// vanilla stance (AI_OrderName default)
+	for (o = 0; o < NEM_ORDERS; o++)
+	{
+	    if (o == li)
+	    {
+		nem_rows[ti].tactics[o] -= NEM_DEATH_TACTIC;
+		if (nem_rows[ti].tactics[o] < NEM_WFLOOR)
+		    nem_rows[ti].tactics[o] = NEM_WFLOOR;
+	    }
+	    else
+	    {
+		nem_rows[ti].tactics[o] += NEM_DEATH_SPREAD;
+		if (nem_rows[ti].tactics[o] > NEM_WCEIL)
+		    nem_rows[ti].tactics[o] = NEM_WCEIL;
+	    }
+	}
+	if (wi >= 0)
+	{
+	    nem_rows[ti].weapon_bias[wi] += NEM_DEATH_FEAR;
+	    if (nem_rows[ti].weapon_bias[wi] > NEM_BCEIL)
+		nem_rows[ti].weapon_bias[wi] = NEM_BCEIL;
+	}
     }
     // (Phase 9.11: the shotgunguy-row kill no longer feeds the buddy ladder --
     // that was the D10 type conflation; the ladder rides the bot's own XP.)
@@ -367,6 +418,10 @@ int NEM_Serialize (char* buf, int buflen)
 	nemrow_t* r = &nem_rows[i];
 	// Only rows with any learned signal are emitted (token economy).
 	int active = r->deaths > 0;
+	// 9.21: emit band widened +-5% -> +-20% of neutral 1.0.  With the old
+	// band the first ~2-3 death lessons per order stayed invisible in the
+	// observe stream, so the dashboard's FIRING/DODGE/MOVEMENT documents
+	// sat on "--" long after learning had started.
 	for (o = 0; o < NEM_ORDERS && !active; o++)
 	    if (r->tactics[o] < 0.95f || r->tactics[o] > 1.05f) active = 1;
 	for (w = 0; w < NEM_WEAPONS && !active; w++)
