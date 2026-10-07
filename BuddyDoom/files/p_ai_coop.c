@@ -4045,6 +4045,10 @@ void P_AICoop_BuildCmd (void)
 	    {
 		hostile_was_dead = 1;
 		hostile_respawn = HOSTILE_RESPAWN_TICS;
+		// Phase 9.20 demo tuning: the lesson bonus -- being put down banks
+		// XP toward the next rank, so EVERY death visibly sharpens the
+		// next life (the "he comes back smarter" beat for the demo video).
+		NEM_NoteBuddyDamage (40);
 	    }
 	    if (hostile_respawn > 0)
 		hostile_respawn--;
@@ -4053,6 +4057,7 @@ void P_AICoop_BuildCmd (void)
 		P_TeleportMove (bot->mo, coop_home_x, coop_home_y);
 		bot->mo->momx = bot->mo->momy = bot->mo->momz = 0;
 		P_AICoop_Revive (AICoop_FullHealth ());	// back on its feet at home, at full HP
+		bot->ammo[am_clip] = bot->maxammo[am_clip];	// pistol-only: never run dry mid-duel
 		hostile_was_dead = 0;			// (Revive() already callouts "revived:")
 	    }
 	    memset (cmd, 0, sizeof(*cmd));
@@ -4680,6 +4685,14 @@ void P_AICoop_BuildCmd (void)
 	if (turn < -turn_max) turn = -turn_max;
     }
     cmd->angleturn = (short)turn;
+
+    // Phase 9.20 demo tuning: hostile training duels are PISTOL-ONLY for the
+    // buddy.  A shotgun-armed buddy (map pickups) one-taps the trainee and
+    // the ladder never gets to show a step; the pistol keeps honest pressure
+    // while the human banks XP.  Switch down every tic until it lands.
+    if (buddy_hostile && bot->readyweapon != wp_pistol
+	&& bot->pendingweapon == wp_nochange)
+	bot->pendingweapon = wp_pistol;
 
     dist = P_AproxDistance (tx - mo->x, ty - mo->y);
 

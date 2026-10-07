@@ -1130,7 +1130,10 @@ void G_PlayerReborn (int player)
     // (re)spawn.  Fist+pistol can't meaningfully pressure the buddy, and the
     // rank ladder (NEM_NoteBuddyDamage) needs the player to actually land
     // damage.  Full shells: the session is about the duel, not the scrounge.
-    if (P_AICoop_HostileMode ())
+    // Phase 9.20 demo tuning: human-only -- the buddy fights with the pistol
+    // (its respawn path is Revive(), not reborn, but a belt-and-braces guard
+    // here costs nothing and keeps the duel survivable).
+    if (P_AICoop_HostileMode () && player == 0)
     {
 	p->weaponowned[wp_shotgun] = true;
 	p->ammo[am_shell] = p->maxammo[am_shell];

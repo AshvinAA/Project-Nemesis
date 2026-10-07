@@ -52,7 +52,7 @@ def _synthetic_obs() -> dict:
                  "weapon_bias": {"pistol": 0.2, "shotgun": -0.35}},
             ],
             "buddy_skill": 2,
-            "buddy_xp": 64,
+            "buddy_xp": 40,  # must stay < BUDDY_XP_PER_RANK (60)
             "events": ["907:rankup:buddy:2", "906:hit:shotgun:shotgun:21",
                        "905:kill:imp:pistol"],
         },
@@ -125,7 +125,7 @@ def test_endpoints_and_ui(tmpdir: str) -> None:
         snap = json.loads(body)
         check(code == 200, "GET /state status %s" % code)
         check(snap.get("buddy_skill") == 2, "snapshot buddy_skill != 2: %r" % snap.get("buddy_skill"))
-        check(snap.get("buddy_xp") == 64, "snapshot buddy_xp != 64: %r" % snap.get("buddy_xp"))
+        check(snap.get("buddy_xp") == 40, "snapshot buddy_xp != 40: %r" % snap.get("buddy_xp"))
         check(snap.get("buddy_xp_next") == config.BUDDY_XP_PER_RANK, "buddy_xp_next wrong")
         check(snap.get("buddy_skill_name") == "semi-pro", "rank name wrong: %r" % snap.get("buddy_skill_name"))
         check(snap.get("player_weapon") == 2, "player_weapon not mirrored: %r" % snap.get("player_weapon"))
@@ -279,7 +279,7 @@ def test_event_label_tolerance() -> None:
     check(parse_label("905:kill:imp:pistol") is not None, "kill label broke")
     check(parse_label("906:hit:shotgun:shotgun:21") is not None, "hit label broke")
     # The mirror constant must match the engine's NEM_BUDDY_XP.
-    check(config.BUDDY_XP_PER_RANK == 100, "BUDDY_XP_PER_RANK must mirror NEM_BUDDY_XP (100)")
+    check(config.BUDDY_XP_PER_RANK == 60, "BUDDY_XP_PER_RANK must mirror NEM_BUDDY_XP (60)")
 
 
 def test_param_feed() -> None:
@@ -302,7 +302,7 @@ def test_param_feed() -> None:
             obs2["nemesis"]["rows"][0]["deaths"] = 4
             # 2) ... and scalars move (10 Hz poll): rank, xp, epsilon.
             obs2["nemesis"]["buddy_skill"] = 3
-            obs2["nemesis"]["buddy_xp"] = 90
+            obs2["nemesis"]["buddy_xp"] = 55		# still < 60
             shim = dash._LiveShim()
             shim.epsilon_override = live.snapshot["epsilon"]   # pin epsilon
             live.update(shim, obs2, None)

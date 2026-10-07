@@ -173,7 +173,7 @@ void NEM_NoteDamageM (const char* type, mobj_t* source, int damage, int weapon_i
 // beating -- it trains harder); every time the BUDDY KILLS the player it
 // drops a rank (the human is already struggling).  The Python trainer's
 // `buddy skill=N` overrides these -- they only move the level when they fire.
-#define NEM_BUDDY_XP	100		// damage absorbed per rank
+#define NEM_BUDDY_XP	60		// damage absorbed per rank (9.20 demo tuning: rank-up every ~2-3 shotgun hits)
 
 static void NEM_BuddyLesson (int delta)
 {

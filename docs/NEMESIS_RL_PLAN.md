@@ -260,6 +260,23 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
       (`flashDocs` + `docglow`), so a change is visible in two places at once (bar + strings feed).
       STRINGS/DRIFT/RECORD/telemetry panels restyled same palette; compact mode restacks the new
       docs too (qrow/qbar shrink rules). Python-only; engine untouched, no rebuild.
+- [x] **9.20 Demo tuning — pistol duels + a ladder that shows on camera** (16-20 s demo video):
+      the shotgun-armed buddy one-tapped the trainee and the ladder never showed a step. Engine
+      changes (rebuilt): (1) `p_ai_coop.c` hostile duels are PISTOL-ONLY for the buddy — a per-tic
+      switch-down to `wp_pistol` in the buddy's fire block (beats map shotgun pickups), clip topped
+      up on every hostile respawn so it never runs dry; (2) the buddy's DEATH banks a +40 XP lesson
+      bonus (`NEM_NoteBuddyDamage(40)` in the `hostile_was_dead` latch) — every death visibly
+      sharpens the next life; (3) `g_game.c` hostile shotgun grant is now human-only (`player == 0`);
+      (4) `p_nemesis.c` `NEM_BUDDY_XP` 100 → **60** — a rank-up every ~2-3 shotgun hits, rookie →
+      legend arc inside one 16-20 s take. The per-rank behavior deltas were already drastic
+      (react 52→4 tics, trigger duty 1/9→9/9, keep-away 448→192 u, aim jitter ±24→0) — the faster
+      ladder is what makes them visible on camera. Python mirror: `config.BUDDY_XP_PER_RANK = 60`
+      (dashboard xp bar/rank bars auto-scale); synthetic test XP values moved inside the 60 clamp.
+      Robustness ride-along: `Nemesis.bat` now pre-kills stale game/dashboard/agent instances
+      (the old stale `--live` dashboard silently double-bound :8787 on Windows and shadowed fresh
+      ones — the "dashboard frozen while playing" report), waits for the dashboard before opening
+      the browser; `dashboard.py` refuses double-binds (`allow_reuse_address` off on nt) and the
+      page shows STALE/live honestly (snapshot age >3 s → "STALE — engine data stopped Ns ago").
 
 ## 10. Phase 7 — Demo video **[ ]**
 
@@ -289,6 +306,7 @@ User brief: "the buddy is too strong at first, he is suppose to be really dumb (
 | D12 | Rank-up drama (9.15) | Fog ring + taunt + screen message + victory pause are DISPLAY-ONLY (no stat/stat-adjacent effect); taunt lumps pre-baked (taunt:0..3); demotes stay quiet | LOCKED |
 | D13 | Param feed + compact mode (9.17/9.18) | Feed = LiveState diff (1 Hz wt rows + 10 Hz rank/xp/eps polls), pure `param_deltas()` shared with the UI replay fallback; no engine changes. Compact = `?compact=1` opt-in 660 px column (game default window is 640×400); wide layout stays the default | LOCKED |
 | D14 | Dashboard v6 "DOCUMENTS" restyle (9.19) | Terminal-green query docs with bar meters, chrome lines (`standing order`/`DIRECTOR`), doc-glow on param changes; all v5 data panels kept (heat moved into `[MOVEMENT]`, ticker into `RECORD`); ids preserved so the 9.13–9.18 contract still holds; Python-only | LOCKED |
+| D15 | Demo tuning (9.20) | Buddy = pistol-only in hostile duels (+clip top-up on respawn); buddy death banks +40 XP; `NEM_BUDDY_XP`/`BUDDY_XP_PER_RANK` = 60; shotgun grant human-only. Goal: visible rank arc in a 16-20 s take. Revert knobs: NEM_BUDDY_XP (p_nemesis.c), config.BUDDY_XP_PER_RANK, the 9.20-marked blocks in p_ai_coop.c/g_game.c | LOCKED (demo) |
 
 ## 13. Run cheat sheet (from HANDOFF.md — verified)
 
@@ -520,3 +538,28 @@ python tools/ladder_test.py
   move regardless. Compact `?compact=1` stylesheet verified in served page (660 px + qrow shrink
   rules); pixel check still on the user's screen.
 - Files: nemesis/{dashboard,test_dashboard}.py; PLAN §9/§12/§14. No C changes, no rebuild.
+
+**2026-10-07 — Phase 9.20 BUILT and verified (session 7 cont.): pistol duels + on-camera learning curve**
+- User request: buddy kills too fast — give him a weaker weapon than the shotgun; make the learning
+  curve visible ("faster and smarter after each death") for a 16-20 s demo video; no game windows
+  until done; dashboard must stay in sync.
+- **Diagnosed first (headless):** the "dashboard frozen while playing" report was a stale-instance
+  race — an old `--live` dashboard kept :8787 AND the engine's single :31666 observer slot; the
+  launcher's new dashboard silently double-bound the port (Windows SO_REUSEADDR semantics) and the
+  browser got a frozen page. The recurring "game exits in seconds" scare was NOT an engine bug:
+  the user was closing my diagnostic game windows popping up over their work (noted — no more game
+  launches from the agent side).
+- **Fixed:** launcher pre-clean (`:cleanslate` in Nemesis.bat: kills stale buddydoom + nemesis
+  pythons via CIM, /T on window kills; :full/:normal/:agent/:gameonly/:dashboard call it; :kill
+  hardened), wait-for-dashboard-then-open-browser, `_Server(ThreadingHTTPServer)` with
+  `allow_reuse_address = os.name != "nt"` (double-bind now fails loudly + friendly port-busy
+  message in `main()`), and the page's STALE/live status line (snapshot age 3-300 s → "STALE —
+  engine data stopped Ns ago", >300 s → "file snapshot from HH:MM").
+- **Demo tuning (engine, rebuilt clean):** buddy pistol-only per-tic switch-down, +40 XP death
+  bonus, human-only shotgun grant, NEM_BUDDY_XP 60. Python mirror BUDDY_XP_PER_RANK = 60; test
+  synthetic XP moved inside the clamp (40/55) and mirror assertion updated.
+- **Tests:** DASHBOARD / SELFTEST / PHASE2 all PASS after the C rebuild; page JS re-parsed clean
+  (node `new Function`); exe staged to BuddyDoom/run. No game launched (per user instruction) —
+  live verification happens at the user's next shortcut launch.
+- Files: BuddyDoom/files/{p_ai_coop.c,g_game.c,p_nemesis.c}; nemesis/{config,test_dashboard}.py;
+  Nemesis.bat; tools/watch_game{,2}.ps1 (diagnostics); PLAN §9/§12/§14.
