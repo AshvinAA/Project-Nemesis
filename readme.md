@@ -1,8 +1,11 @@
 # Project Nemesis
 
-**A real-time reinforcement-learning enemy for DOOM.**
+![Python](https://img.shields.io/badge/python-3.x-3776AB?logo=python&logoColor=white&labelColor=306998&color=46ff7d)
+![C](https://img.shields.io/badge/C-GCC%2016.2-00599C?logo=c&logoColor=white&labelColor=1c3a26&color=46ff7d)
+![CMake](https://img.shields.io/badge/CMake-3.31.6-069CC5?logo=cmake&logoColor=white&labelColor=1c3a26&color=46ff7d)
+![SDL3](https://img.shields.io/badge/SDL3-freedoom1.wad-1C3A26?logo=doom&logoColor=white&labelColor=1c3a26&color=46ff7d)
 
-**Classic DOOM enemies are lobotomized.** The shotgun guy's `A_Chase` rolls random chances to walk toward you and occasionally stop and fire — same animation, same decision, every encounter for thirty years. Project Nemesis rips that function out and replaces it with a learning agent people call *jev*. He starts **almost useless** — barely aims, dies in one opening blast — and every time you kill him, an external RL process reads what killed him and he comes back **tactically smarter**: better cover, better flanking, better retreat timing. The point isn't to make him harder — it's to prove **real-time tactical learning against a human is possible**, with **no stat buffs** anywhere in the loop.
+**A real-time reinforcement-learning enemy for DOOM.**
 
 <!-- TODO: drop a banner screenshot here -->
 <!-- TODO: drop a demo video link/badge here when the 16–20 s take is ready -->
